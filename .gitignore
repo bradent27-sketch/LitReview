@@ -6,10 +6,10 @@ __pycache__/
 .venv/
 venv/
 
-# LitDesk runtime data (local DB, cache, generated digests, real config)
+# LitDesk runtime data (local DB, cache, generated digests/exports, real config)
 data/
 cache/
-digests/*.html
+digests/
 config/config.yaml
 
 # Model weights downloaded by sentence-transformers

@@ -209,6 +209,64 @@ def cmd_synthesis(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Phase 5: BibTeX of everything currently thumbed up."""
+    import datetime as dt
+
+    from litdesk.export import export_rated_up_bibtex
+
+    cfg = load_config(args.config)
+    with open_db(resolve_path(cfg.db_path)) as conn:
+        bibtex = export_rated_up_bibtex(conn)
+
+    if not bibtex:
+        print("Nothing thumbed up yet — nothing to export.")
+        return 0
+
+    out_dir = resolve_path(cfg.digest.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"export-{dt.date.today().isoformat()}.bib"
+    out_path.write_text(bibtex + "\n")
+    print(bibtex)
+    print(f"\nWritten to {out_path}")
+    return 0
+
+
+def cmd_check_retractions(args: argparse.Namespace) -> int:
+    """Phase 5: re-scan stored metadata for retraction/correction flags."""
+    from litdesk.retractions import check_all_papers
+
+    cfg = load_config(args.config)
+    with open_db(resolve_path(cfg.db_path)) as conn:
+        flagged = check_all_papers(conn)
+
+    if not flagged:
+        print("No new retractions/corrections found.")
+        return 0
+    for f in flagged:
+        print(f"[{f['note']}] {f['title']}")
+    print(f"\n{len(flagged)} paper(s) newly flagged — see ‘litdesk notifications’.")
+    return 0
+
+
+def cmd_notifications(args: argparse.Namespace) -> int:
+    """Surfaces preprint->published, scoop-alarm, and retraction notices."""
+    cfg = load_config(args.config)
+    with open_db(resolve_path(cfg.db_path)) as conn:
+        query = "SELECT * FROM notifications" + ("" if args.all else " WHERE seen = 0") + " ORDER BY id DESC"
+        rows = conn.execute(query).fetchall()
+        if not args.all:
+            conn.execute("UPDATE notifications SET seen = 1 WHERE seen = 0")
+            conn.commit()
+
+    if not rows:
+        print("No notifications." if args.all else "No new notifications.")
+        return 0
+    for r in rows:
+        print(f"[{r['type']}] {r['created_at']}  {r['message']}")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     port = args.port or cfg.server.port
@@ -263,6 +321,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_synthesis = sub.add_parser("synthesis", help="Phase 4: weekly cross-paper synthesis (needs llm.enabled)")
     p_synthesis.add_argument("--days", type=int, default=7, help="Lookback window in days (default 7)")
     p_synthesis.set_defaults(func=cmd_synthesis)
+
+    p_export = sub.add_parser("export", help="Phase 5: BibTeX of everything currently thumbed up")
+    p_export.set_defaults(func=cmd_export)
+
+    p_retractions = sub.add_parser(
+        "check-retractions", help="Phase 5: re-scan stored metadata for retraction/correction flags"
+    )
+    p_retractions.set_defaults(func=cmd_check_retractions)
+
+    p_notifications = sub.add_parser(
+        "notifications", help="Phase 5: preprint->published, scoop-alarm, and retraction notices"
+    )
+    p_notifications.add_argument("--all", action="store_true", help="Show already-seen notifications too")
+    p_notifications.set_defaults(func=cmd_notifications)
 
     return parser
 

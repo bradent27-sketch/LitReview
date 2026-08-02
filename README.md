@@ -26,7 +26,15 @@ built from — data sources, schema, ranking approach, build phases.
       `litdesk synthesis` command for a weekly cross-paper synthesis
       (`claude-sonnet-5`). Every LLM call degrades to "skip it" on any
       failure — a bad key or a rate limit never breaks a digest run.
-- [ ] Phase 5 — Watchlists, scoop alarm, retraction flags, exports
+- [x] **Phase 5 — high-value extras.** Author watchlists and a scoop alarm
+      always force a paper into the digest regardless of score; retraction/
+      correction flags (from metadata you've already ingested — no extra API
+      calls) exclude a paper from ever being recommended; a preprint you
+      rated up getting a journal DOI writes a notification; catch-up mode
+      caps the digest after a gap instead of dumping everything; `litdesk
+      export` writes BibTeX of everything thumbed up. `litdesk notifications`
+      surfaces all of the above in one place. ("Citing paper X" watchlists
+      and lab/affiliation matching aren't wired up — see the open questions.)
 
 ## Setup
 
@@ -59,6 +67,9 @@ litdesk run         # ingest + seeds + embed + digest in one shot — the cronta
 litdesk serve       # Phase 3: serve the digest at http://127.0.0.1:8000 with working rating buttons
 litdesk retrain     # Phase 3: held-out accuracy of the trained ranker on your ratings so far
 litdesk synthesis   # Phase 4: weekly cross-paper synthesis (needs llm.enabled: true) — a separate weekly cron entry
+litdesk export             # Phase 5: BibTeX of everything currently thumbed up
+litdesk check-retractions  # Phase 5: re-scan stored metadata for retraction/correction flags — a weekly cron entry
+litdesk notifications      # Phase 5: preprint->published, scoop-alarm, and retraction notices (--all for history)
 litdesk runs        # Show recent run history (useful after a cron job, or when debugging)
 ```
 
@@ -192,6 +203,46 @@ Claude Pro/Max subscription via `claude -p` instead of a metered API key) is
 in config as a placeholder for the option the spec raised, but isn't wired up
 yet — see the open questions below.
 
+## Phase 5 extras
+
+- **Watchlists** (`watchlists.authors`) — a paper by a watchlisted author is
+  always included in the digest regardless of score, tagged "watchlist:
+  &lt;name&gt;". Matched case-insensitively as a substring against each
+  paper's stored author strings. `watchlists.labs` (affiliation-based) isn't
+  wired up — affiliation strings aren't normalized enough across sources to
+  match reliably. "Anything citing paper X" isn't implemented either — it
+  needs a citation-graph API integration, a bigger lift than the rest of
+  Phase 5.
+- **Scoop alarm** (`scoop_alarm.enabled` + `project_description`) — every
+  candidate is compared against a fresh embedding of `project_description`
+  each run; anything above `scoop_alarm.threshold` is force-included and
+  shown with a loud red "🚨 scoop alert" badge distinct from the normal score
+  bands, plus a `notifications` entry.
+- **Retraction/correction flags** — derived from metadata you've already
+  ingested (Europe PMC's `pubTypeList`), so `litdesk check-retractions` costs
+  no extra API calls. A flagged paper is excluded from all future digests
+  entirely (`papers.retracted`), not just visually marked — a retracted
+  paper isn't something worth recommending. This only catches retractions
+  Europe PMC had already recorded as of when you ingested the paper; rerun
+  `check-retractions` periodically (e.g. alongside the weekly `litdesk
+  synthesis`) so already-stored papers get re-examined as later ingests
+  refresh their metadata.
+- **Preprint → published notifier** — the moment `ingest` learns a preprint's
+  journal DOI for the first time (via bioRxiv's `published` field, see
+  "Dedup" above), if that preprint is something you rated up, it writes a
+  notification. Silent for everything else — most preprints are unrated,
+  and this isn't interesting unless you cared enough to thumbs-up it first.
+- **Catch-up digest** — if the gap since your last digest exceeds
+  `digest.catchup_gap_days`, the digest caps at `digest.catchup_top_n`
+  (default 15, vs. the normal 25) instead of dumping everything that piled
+  up, and shows a banner: "you were away N days — M new papers piled up".
+- **`litdesk notifications`** surfaces all of the above (scoop alerts,
+  retraction flags, preprint→published) from one place, marking them seen
+  as you read them (`--all` for full history).
+- **`litdesk export`** writes BibTeX (`digests/export-<date>.bib`) for every
+  paper whose current rating is +1 — preprints export as `@unpublished`
+  with a "Preprint" note, everything else as `@article`.
+
 ## Offline development
 
 The entire pipeline (minus LLM calls and minus the one-time model weight
@@ -234,5 +285,7 @@ litdesk/
   llm/
     client.py                          # Phase 4: Anthropic client, never raises — returns None on any failure
     summarize.py                        # per-paper TLDR + weekly synthesis
-  cli.py                                # `litdesk` command entrypoint
+  retractions.py                         # Phase 5: retraction/correction flags from stored raw metadata
+  export.py                               # Phase 5: BibTeX export of thumbed-up papers
+  cli.py                                    # `litdesk` command entrypoint
 ```

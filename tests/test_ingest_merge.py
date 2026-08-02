@@ -101,6 +101,68 @@ def test_journal_first_then_preprint_arrives_does_not_clobber_journal_metadata(d
     assert row["date_first_seen"] == "2025-11-01"
 
 
+def test_notifies_when_a_rated_up_preprint_gets_published_doi(db_conn):
+    pid, _ = upsert_paper(db_conn, RawPaper(
+        source="biorxiv", title="Preprint I like", doi="10.1101/liked-1",
+        is_preprint=True, date_published="2026-05-01",
+    ))
+    db_conn.execute("INSERT INTO ratings (paper_id, label, rated_at) VALUES (?, 1, '2026-05-02')", (pid,))
+    db_conn.commit()
+
+    upsert_paper(db_conn, RawPaper(
+        source="biorxiv", title="Preprint I like", doi="10.1101/liked-1",
+        is_preprint=True, published_doi="10.1016/journal-liked-1", date_published="2026-05-01",
+    ))
+
+    notif = db_conn.execute(
+        "SELECT * FROM notifications WHERE paper_id = ? AND type = 'preprint_published'", (pid,)
+    ).fetchone()
+    assert notif is not None
+    assert "10.1016/journal-liked-1" in notif["message"]
+
+
+def test_does_not_notify_for_unrated_or_downvoted_preprints(db_conn):
+    unrated_id, _ = upsert_paper(db_conn, RawPaper(
+        source="biorxiv", title="Unrated preprint", doi="10.1101/unrated-1",
+        is_preprint=True, date_published="2026-05-01",
+    ))
+    downvoted_id, _ = upsert_paper(db_conn, RawPaper(
+        source="biorxiv", title="Downvoted preprint", doi="10.1101/down-1",
+        is_preprint=True, date_published="2026-05-01",
+    ))
+    db_conn.execute("INSERT INTO ratings (paper_id, label, rated_at) VALUES (?, -1, '2026-05-02')", (downvoted_id,))
+    db_conn.commit()
+
+    upsert_paper(db_conn, RawPaper(
+        source="biorxiv", title="Unrated preprint", doi="10.1101/unrated-1",
+        is_preprint=True, published_doi="10.1016/journal-unrated", date_published="2026-05-01",
+    ))
+    upsert_paper(db_conn, RawPaper(
+        source="biorxiv", title="Downvoted preprint", doi="10.1101/down-1",
+        is_preprint=True, published_doi="10.1016/journal-down", date_published="2026-05-01",
+    ))
+
+    assert db_conn.execute("SELECT COUNT(*) AS n FROM notifications").fetchone()["n"] == 0
+
+
+def test_does_not_renotify_once_published_doi_already_known(db_conn):
+    pid, _ = upsert_paper(db_conn, RawPaper(
+        source="biorxiv", title="Preprint I like", doi="10.1101/liked-2",
+        is_preprint=True, date_published="2026-05-01",
+    ))
+    db_conn.execute("INSERT INTO ratings (paper_id, label, rated_at) VALUES (?, 1, '2026-05-02')", (pid,))
+    db_conn.commit()
+
+    for _ in range(2):  # simulate the same info arriving on two separate ingest runs
+        upsert_paper(db_conn, RawPaper(
+            source="biorxiv", title="Preprint I like", doi="10.1101/liked-2",
+            is_preprint=True, published_doi="10.1016/journal-liked-2", date_published="2026-05-01",
+        ))
+
+    count = db_conn.execute("SELECT COUNT(*) AS n FROM notifications WHERE paper_id = ?", (pid,)).fetchone()["n"]
+    assert count == 1
+
+
 def test_title_author_year_fallback_when_no_doi(db_conn):
     id1, is_new1 = upsert_paper(db_conn, RawPaper(
         source="europepmc", title="No DOI Here", doi=None, authors=["Smith JA"], date_published="2026-02-01",

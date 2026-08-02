@@ -65,6 +65,12 @@ digest:
 server:
   port: 8000
 
+# Papers by a watchlisted author are always included in the digest, tagged
+# "watchlist: <name>" — matched case-insensitively as a substring against
+# each paper's stored author strings (e.g. "smith" matches "Smith JA" and
+# "Smith, J."). `labs` is reserved for affiliation-based matching, not
+# wired up yet — affiliation strings aren't normalized enough across
+# sources to match reliably.
 watchlists:
   authors: []
   labs: []

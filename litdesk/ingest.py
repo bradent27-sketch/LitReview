@@ -84,7 +84,27 @@ def upsert_paper(conn, paper: RawPaper) -> tuple[int, bool]:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         conn.execute(f"UPDATE papers SET {set_clause} WHERE id = ?", (*updates.values(), row_id))  # noqa: S608
 
+        if "published_doi" in updates:
+            _notify_if_rated_up(conn, row_id, updates["published_doi"])
+
     return row_id, False
+
+
+def _notify_if_rated_up(conn, paper_id: int, published_doi: str) -> None:
+    """Preprint->published notifier (spec Phase 5): fires the moment a
+    paper's published_doi is set for the first time, if the paper is
+    something the user rated up. Silent for everything else — most papers
+    are unrated, and this isn't interesting unless you cared enough to
+    thumbs-up the preprint."""
+    rating = conn.execute(
+        "SELECT label FROM ratings WHERE paper_id = ? ORDER BY id DESC LIMIT 1", (paper_id,)
+    ).fetchone()
+    if rating is None or rating["label"] != 1:
+        return
+    conn.execute(
+        "INSERT INTO notifications (paper_id, type, message, created_at) VALUES (?, 'preprint_published', ?, ?)",
+        (paper_id, f"A preprint you rated up now has a journal DOI: {published_doi}", _now_iso()),
+    )
 
 
 def log_run(conn, source: str, started_at: str, n_fetched: int, n_new: int, n_deduped: int, error: str | None = None) -> None:

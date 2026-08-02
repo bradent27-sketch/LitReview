@@ -1,7 +1,8 @@
-"""Phase 2: candidate selection, ranking persistence, static HTML rendering.
+"""Candidate selection, ranking persistence, static HTML rendering.
 
 `build_digest` handles ranking + bookkeeping; `render_html` handles output.
-`generate_digest` chains both — that's what the CLI calls.
+cli.py's `_build_and_render_digest` chains both plus the optional Phase 4
+LLM enrichment step.
 """
 
 from __future__ import annotations
@@ -19,13 +20,14 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
 def candidate_paper_ids(conn) -> list[int]:
-    """Papers never rated, never seeded, and never shown in a previous
-    digest — decoupled from any date window so a lagged ingest or a gap in
-    runs never silently drops or repeats a paper."""
+    """Papers never rated, never seeded, never flagged retracted, and never
+    shown in a previous digest — decoupled from any date window so a lagged
+    ingest or a gap in runs never silently drops or repeats a paper."""
     rows = conn.execute(
         """
         SELECT p.id FROM papers p
-        WHERE p.id NOT IN (SELECT paper_id FROM ratings)
+        WHERE p.retracted = 0
+          AND p.id NOT IN (SELECT paper_id FROM ratings)
           AND p.id NOT IN (SELECT paper_id FROM seeds)
           AND p.id NOT IN (
               SELECT CAST(je.value AS INTEGER)
@@ -48,16 +50,63 @@ def _band_for_rank(position: int, total: int) -> str:
     return "low"
 
 
-def _forced_include_ids(conn, cfg: Config, candidate_ids: list[int], already_selected: set[int]) -> set[int]:
-    if not cfg.journals_always_include or not candidate_ids:
-        return set()
+def _gap_days_since_last_digest(conn) -> int | None:
+    row = conn.execute("SELECT run_date FROM digests ORDER BY id DESC LIMIT 1").fetchone()
+    if row is None:
+        return None
+    last = dt.date.fromisoformat(row["run_date"])
+    return (dt.date.today() - last).days
+
+
+def _forced_include(
+    conn, cfg: Config, candidate_ids: list[int], already_selected: set[int],
+) -> dict[int, str]:
+    """Returns {paper_id: reason} for candidates that belong in the digest
+    regardless of score: a configured always-include journal, or a
+    watchlisted author (spec Phase 5). `watchlists.labs` isn't matched here
+    yet — affiliation strings aren't normalized enough to match reliably."""
+    if (not cfg.journals_always_include and not cfg.watchlists.authors) or not candidate_ids:
+        return {}
     placeholders = ",".join("?" for _ in candidate_ids)
     rows = conn.execute(
-        f"SELECT id, journal FROM papers WHERE id IN ({placeholders})",  # noqa: S608
+        f"SELECT id, journal, authors FROM papers WHERE id IN ({placeholders})",  # noqa: S608
         candidate_ids,
     ).fetchall()
     journal_set = set(cfg.journals_always_include)
-    return {r["id"] for r in rows if r["journal"] in journal_set and r["id"] not in already_selected}
+    watch_authors = {a.lower() for a in cfg.watchlists.authors}
+
+    reasons: dict[int, str] = {}
+    for row in rows:
+        if row["id"] in already_selected:
+            continue
+        if row["journal"] in journal_set:
+            reasons[row["id"]] = f"always include: {row['journal']}"
+            continue
+        if not watch_authors:
+            continue
+        paper_authors = [a.lower() for a in json.loads(row["authors"] or "[]")]
+        hit = next((wa for wa in watch_authors if any(wa in pa for pa in paper_authors)), None)
+        if hit:
+            reasons[row["id"]] = f"watchlist: {hit.title()}"
+    return reasons
+
+
+def _scoop_alerts(conn, cfg: Config, candidate_ids: list[int]) -> set[int]:
+    """Candidates unusually similar to `project_description` (spec Phase 5:
+    "flag anything above a similarity threshold ... separately and
+    loudly"). Embeds the description fresh every run rather than caching it
+    — one extra embed call, never a stale comparison after an edit."""
+    if not cfg.scoop_alarm.enabled or not cfg.project_description.strip() or not candidate_ids:
+        return set()
+    from litdesk import embeddings as emb
+
+    model_name = cfg.embeddings.model
+    project_vec = emb.embed_texts(model_name, [cfg.project_description])[0]
+    candidate_vecs = ranking.load_embeddings(conn, model_name, candidate_ids)
+    return {
+        pid for pid, vec in candidate_vecs.items()
+        if ranking.cosine_similarity(vec, project_vec) >= cfg.scoop_alarm.threshold
+    }
 
 
 def _rank_candidates(conn, cfg: Config, candidate_ids: list[int]) -> tuple[str, list[ranking.RankedPaper]]:
@@ -82,6 +131,7 @@ def build_digest(conn, cfg: Config) -> dict:
     Returns the dict `render_html` expects. Run `litdesk seeds` and
     `litdesk embed` first (or use `litdesk digest`, which chains everything)."""
     run_date = dt.date.today().isoformat()
+    gap_days = _gap_days_since_last_digest(conn)
     candidate_ids = candidate_paper_ids(conn)
 
     if not candidate_ids:
@@ -93,13 +143,19 @@ def build_digest(conn, cfg: Config) -> dict:
             "Candidates exist but none have embeddings yet — run `litdesk embed` before `litdesk digest`"
         )
 
-    top = ranked[: cfg.digest.top_n]
+    is_catchup = gap_days is not None and gap_days > cfg.digest.catchup_gap_days
+    top_n = cfg.digest.catchup_top_n if is_catchup else cfg.digest.top_n
+
+    top = ranked[:top_n]
     band_by_id = {r.paper_id: _band_for_rank(i, len(top)) for i, r in enumerate(top)}
     selected_ids = set(band_by_id)
 
-    forced_ids = _forced_include_ids(conn, cfg, candidate_ids, selected_ids)
+    forced_reasons = _forced_include(conn, cfg, candidate_ids, selected_ids)
+    scoop_ids = _scoop_alerts(conn, cfg, candidate_ids)
     ranked_by_id = {r.paper_id: r for r in ranked}
-    selected = [ranked_by_id[pid] for pid in selected_ids | forced_ids if pid in ranked_by_id]
+    selected = [
+        ranked_by_id[pid] for pid in selected_ids | set(forced_reasons) | scoop_ids if pid in ranked_by_id
+    ]
     selected.sort(key=lambda r: r.score, reverse=True)
 
     paper_rows = _fetch_papers(conn, [r.paper_id for r in selected])
@@ -122,7 +178,9 @@ def build_digest(conn, cfg: Config) -> dict:
             "is_preprint": bool(p["is_preprint"]),
             "score": r.score,
             "band": band_by_id.get(r.paper_id),
-            "forced_include": r.paper_id in forced_ids and r.paper_id not in selected_ids,
+            "forced_include": r.paper_id in forced_reasons and r.paper_id not in selected_ids,
+            "forced_reason": forced_reasons.get(r.paper_id),
+            "scoop_alert": r.paper_id in scoop_ids,
             "nearest_title": nearest_titles.get(r.nearest_paper_id),
             "nearest_similarity": r.nearest_similarity,
             "nearest_label": r.nearest_label,
@@ -137,17 +195,22 @@ def build_digest(conn, cfg: Config) -> dict:
                VALUES (?,?,?,?,?,?,?,?)""",
             (r.paper_id, run_date, r.score, method, r.nearest_paper_id, r.nearest_similarity, r.nearest_label, model_version),
         )
+    for pid in scoop_ids:
+        conn.execute(
+            "INSERT INTO notifications (paper_id, type, message, created_at) VALUES (?, 'scoop_alarm', ?, ?)",
+            (pid, f"Similarity to your active project is >= {cfg.scoop_alarm.threshold}", now),
+        )
     conn.execute(
         "INSERT INTO digests (run_date, paper_ids, model_version, is_catchup, created_at) VALUES (?,?,?,?,?)",
-        (run_date, json.dumps([r.paper_id for r in selected]), model_version, 0, now),
+        (run_date, json.dumps([r.paper_id for r in selected]), model_version, int(is_catchup), now),
     )
     conn.commit()
 
     return {
         "entries": entries,
         "run_date": run_date,
-        "is_catchup": False,
-        "gap_days": 0,
+        "is_catchup": is_catchup,
+        "gap_days": gap_days or 0,
         "n_candidates_total": len(candidate_ids),
     }
 
