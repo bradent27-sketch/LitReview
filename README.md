@@ -8,6 +8,19 @@ you open in a browser. No account, no cloud, no subscription.
 See [`litdesk-spec.md`](./litdesk-spec.md) for the full design doc this is
 built from — data sources, schema, ranking approach, build phases.
 
+## Acceptance criteria (spec section 8)
+
+- [x] One command produces today's digest end to end — `litdesk run`
+- [x] Runs unattended on a schedule and writes a run record every time — cron/launchd
+      (see "Scheduling"), `runs` table gets a row per source even on total failure
+- [x] Rating a paper changes tomorrow's ranking in a way you can observe —
+      the classifier retrains on every run once you've rated enough, and
+      every ranked paper shows *why* it ranked where it did
+- [x] Zero duplicates across sources in a 30-day window — normalized
+      DOI/PMID/title+author+year matching, preprint/journal merge (see "Dedup")
+- [x] The full pipeline (minus LLM calls) runs offline against cached data —
+      see "Offline development"
+
 ## Status
 
 - [x] **Phase 1 — Ingest and dedup.** Europe PMC + bioRxiv/medRxiv clients with
@@ -87,6 +100,63 @@ row per source to the `runs` table — even on total failure (see "Offline
 development" below) — specifically so a broken API or a bad cron setup
 doesn't fail silently. Check `litdesk runs` (or the process exit code, which
 is non-zero if any source errored) if a digest seems stale.
+
+## Scheduling
+
+Not a daemon — `litdesk run` does one pass and exits, so it's meant to be
+invoked by `cron` (Linux) or `launchd` (macOS). `litdesk serve` is the one
+long-running piece, and only needs to be up while you're actually rating
+papers.
+
+**cron** (`crontab -e`; use absolute paths — cron's environment is minimal):
+
+```cron
+# Daily digest at 7am
+0 7 * * *   cd /path/to/LitReview && .venv/bin/litdesk run >> data/logs/cron.log 2>&1
+
+# Weekday mornings only, instead of daily — swap the line above for:
+0 7 * * 1-5 cd /path/to/LitReview && .venv/bin/litdesk run >> data/logs/cron.log 2>&1
+
+# Weekly synthesis, Monday mornings (after that day's digest)
+30 7 * * 1  cd /path/to/LitReview && .venv/bin/litdesk synthesis >> data/logs/cron.log 2>&1
+
+# Weekly retraction re-check, Sunday night
+0 22 * * 0  cd /path/to/LitReview && .venv/bin/litdesk check-retractions >> data/logs/cron.log 2>&1
+```
+
+`litdesk run` exits non-zero if any source errored during ingest, so cron's
+default behavior (mail the output of a failed job, if your system has local
+mail configured) is a second line of defense on top of the `runs` table —
+belt and suspenders against the exact "silent failure nobody notices for
+three weeks" scenario the whole run-logging design is built to avoid.
+
+**launchd** (macOS) — same idea, a `LaunchAgent` plist with
+`ProgramArguments` pointing at `.venv/bin/litdesk run`, a `StartCalendarInterval`
+for the schedule, and `WorkingDirectory` set to the repo root (launchd
+doesn't `cd` for you the way a cron line with `cd &&` does):
+
+```xml
+<!-- ~/Library/LaunchAgents/com.litdesk.run.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.litdesk.run</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/LitReview/.venv/bin/litdesk</string>
+    <string>run</string>
+  </array>
+  <key>WorkingDirectory</key><string>/path/to/LitReview</string>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/path/to/LitReview/data/logs/launchd.log</string>
+  <key>StandardErrorPath</key><string>/path/to/LitReview/data/logs/launchd.log</string>
+</dict></plist>
+```
+
+Load it with `launchctl load ~/Library/LaunchAgents/com.litdesk.run.plist`;
+duplicate for `synthesis` / `check-retractions` on their own schedules the
+same way the cron example does.
 
 ## Configuration
 
@@ -242,6 +312,32 @@ yet — see the open questions below.
 - **`litdesk export`** writes BibTeX (`digests/export-<date>.bib`) for every
   paper whose current rating is +1 — preprints export as `@unpublished`
   with a "Preprint" note, everything else as `@article`.
+
+## Open questions
+
+Spec section 9 asked six things before building anything. Everything below
+already works with sensible placeholders/defaults, so none of it blocked a
+working end-to-end pipeline — but these are the things only you can decide:
+
+1. **Standing queries** — `config.yaml`'s `queries` field still has 3
+   placeholder Europe PMC queries. Replace them with your actual
+   topics/techniques/proteins/pathways (self-serve; see "Configuration").
+2. **Journals to always include** — `journals_always_include` is empty by
+   default; add any you want surfaced regardless of score.
+3. **Digest frequency** — daily vs. weekdays-only is purely a choice of
+   which cron line you use (see "Scheduling") — no code difference.
+4. **Delivery: browser, email, or both** — browser is what's built (a
+   static HTML file, plus `litdesk serve` for the rating buttons). Email
+   would need SMTP credentials from you to wire up.
+5. **Seed paper format** — both a DOI list (`seeds.dois`) and a BibTeX
+   export (`seeds.bibtex_path`, e.g. from Zotero/Paperpile) are implemented.
+   A folder of PDFs is not (it would need PDF text extraction + DOI lookup
+   by title — a bigger lift, and lower-confidence matching).
+6. **Claude billing: API key or `claude -p`** — only the direct API key
+   path (`llm.provider: api`) is implemented, off by default. `claude -p`
+   billing was flagged in the spec as having an uncertain future (a move to
+   a separate monthly credit was announced for `claude -p`/Agent SDK usage,
+   then paused) — happy to build that path too if you'd rather go that route.
 
 ## Offline development
 
