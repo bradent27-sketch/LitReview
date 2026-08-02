@@ -1,0 +1,18 @@
+{
+  "hitCount": 2,
+  "nextCursorMark": "PAGE2",
+  "resultList": {
+    "result": [
+      {
+        "id": "1", "source": "MED", "pmid": "1", "doi": "10.1000/aaa",
+        "title": "Paper A", "authorString": "Alpha A",
+        "authorList": {"author": [{"fullName": "Alpha A"}]},
+        "journalInfo": {"journal": {"title": "J1"}},
+        "pubYear": "2026", "firstPublicationDate": "2026-07-01",
+        "abstractText": "Abstract A.",
+        "meshHeadingList": {"meshHeading": []},
+        "fullTextUrlList": {"fullTextUrl": []}
+      }
+    ]
+  }
+}

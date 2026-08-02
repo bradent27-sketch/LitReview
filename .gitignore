@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# LitDesk runtime data (local DB, cache, generated digests, real config)
+data/
+cache/
+digests/*.html
+config/config.yaml
+
+# Model weights downloaded by sentence-transformers
+.cache/
+models/
+
+# OS / editor
+.DS_Store
+*.swp
