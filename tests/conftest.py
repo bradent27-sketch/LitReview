@@ -49,3 +49,50 @@ class FakeSession:
 @pytest.fixture
 def make_fake_session():
     return FakeSession
+
+
+@pytest.fixture
+def insert_paper():
+    def _insert(conn, **overrides):
+        fields = dict(
+            doi=None, pmid=None, pmcid=None, source="europepmc", is_preprint=0,
+            published_doi=None, title="Untitled", abstract=None, authors="[]",
+            journal=None, date_published="2026-01-01", date_published_kind="epub",
+            date_first_seen="2026-01-01", date_ingested="2026-01-01T00:00:00", url=None,
+            pdf_url=None, mesh_terms="[]", dedup_title_key=None, raw=None,
+        )
+        fields.update(overrides)
+        cols = ", ".join(fields)
+        placeholders = ", ".join("?" for _ in fields)
+        cur = conn.execute(f"INSERT INTO papers ({cols}) VALUES ({placeholders})", list(fields.values()))  # noqa: S608
+        conn.commit()
+        return cur.lastrowid
+    return _insert
+
+
+@pytest.fixture
+def insert_embedding():
+    def _insert(conn, paper_id, vec, model="test-model"):
+        import numpy as np
+
+        from litdesk.embeddings import vec_to_blob
+
+        conn.execute(
+            "INSERT OR REPLACE INTO embeddings (paper_id, model, vec) VALUES (?, ?, ?)",
+            (paper_id, model, vec_to_blob(np.array(vec, dtype="float32"))),
+        )
+        conn.commit()
+    return _insert
+
+
+@pytest.fixture
+def insert_seed():
+    def _insert(conn, paper_id, note=None):
+        import datetime as dt
+
+        conn.execute(
+            "INSERT INTO seeds (paper_id, note, added_at) VALUES (?, ?, ?)",
+            (paper_id, note, dt.datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+    return _insert

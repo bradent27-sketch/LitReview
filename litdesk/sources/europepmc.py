@@ -124,3 +124,17 @@ def search(
         logger.warning("europepmc: hit max_pages=%d safety cap for query %r", max_pages, query)
 
     return papers
+
+
+def fetch_by_doi(session: CachedSession, doi: str) -> RawPaper | None:
+    """Direct, undated lookup — used for seed papers (spec section 5), which
+    may predate any lookback window and won't match a standing query."""
+    params = {
+        "query": f'DOI:"{doi}"',
+        "format": "json",
+        "resultType": "core",
+        "pageSize": 1,
+    }
+    body = session.get_json(BASE_URL, params=params)
+    results = body.get("resultList", {}).get("result", [])
+    return parse_result(results[0]) if results else None

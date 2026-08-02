@@ -8,7 +8,10 @@ import sys
 
 from litdesk.config import load_config, resolve_path
 from litdesk.db import open_db
+from litdesk.digest import generate_digest
+from litdesk.embeddings import embed_missing
 from litdesk.ingest import run_ingest
+from litdesk.seeds import load_seeds_from_config
 
 logger = logging.getLogger("litdesk.cli")
 
@@ -76,6 +79,72 @@ def cmd_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_seeds(args: argparse.Namespace) -> int:
+    cfg = load_config(args.config)
+    db_path = resolve_path(cfg.db_path)
+    with open_db(db_path) as conn:
+        results = load_seeds_from_config(conn, cfg)
+
+    if not results:
+        print("No seeds configured. Set seeds.dois (or seeds.bibtex_path) in config.yaml.")
+        return 0
+    for r in results:
+        print(f"{r['status']:<16} {r['doi']}")
+    n_ok = sum(1 for r in results if r["status"] != "not_found")
+    print(f"\n{n_ok}/{len(results)} seeds loaded.")
+    return 0 if n_ok == len(results) else 1
+
+
+def cmd_embed(args: argparse.Namespace) -> int:
+    cfg = load_config(args.config)
+    db_path = resolve_path(cfg.db_path)
+    with open_db(db_path) as conn:
+        n = embed_missing(conn, cfg)
+    print(f"Embedded {n} paper(s) with {cfg.embeddings.model}.")
+    return 0
+
+
+def cmd_digest(args: argparse.Namespace) -> int:
+    cfg = load_config(args.config)
+    db_path = resolve_path(cfg.db_path)
+    with open_db(db_path) as conn:
+        load_seeds_from_config(conn, cfg)
+        embed_missing(conn, cfg)
+        try:
+            path, data = generate_digest(conn, cfg)
+        except ValueError as exc:
+            print(f"Can't build a digest yet: {exc}", file=sys.stderr)
+            return 1
+    print(f"{len(data['entries'])} paper(s) -> {path}")
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Ingest + seeds + embed + digest in one shot — the crontab entry."""
+    cfg = load_config(args.config)
+    db_path = resolve_path(cfg.db_path)
+    had_error = False
+    with open_db(db_path) as conn:
+        for r in run_ingest(conn, cfg):
+            err = f"  ERROR: {r['error']}" if r["error"] else ""
+            had_error = had_error or bool(r["error"])
+            print(f"ingest {r['source']:<10} fetched={r['fetched']:<5} new={r['new']:<5} deduped={r['deduped']:<5}{err}")
+
+        load_seeds_from_config(conn, cfg)
+        embed_missing(conn, cfg)
+        try:
+            path, data = generate_digest(conn, cfg)
+        except ValueError as exc:
+            print(f"Can't build a digest yet: {exc}", file=sys.stderr)
+            return 1
+
+    print(f"\n{len(data['entries'])} paper(s) -> {path}")
+    if had_error:
+        print("(one or more sources errored during ingest — see above / `litdesk runs`)", file=sys.stderr)
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="litdesk", description="Personal literature triage agent.")
     parser.add_argument(
@@ -94,6 +163,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_runs = sub.add_parser("runs", help="Show recent run log entries")
     p_runs.add_argument("--limit", type=int, default=20)
     p_runs.set_defaults(func=cmd_runs)
+
+    p_seeds = sub.add_parser("seeds", help="Load seed papers from config.yaml (seeds.dois / seeds.bibtex_path)")
+    p_seeds.set_defaults(func=cmd_seeds)
+
+    p_embed = sub.add_parser("embed", help="Phase 2: embed every paper missing a vector under the configured model")
+    p_embed.set_defaults(func=cmd_embed)
+
+    p_digest = sub.add_parser("digest", help="Phase 2: rank candidates and render today's HTML digest")
+    p_digest.set_defaults(func=cmd_digest)
+
+    p_run = sub.add_parser("run", help="One command, today's digest end to end: ingest + seeds + embed + digest")
+    p_run.set_defaults(func=cmd_run)
 
     return parser
 
