@@ -145,6 +145,39 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retrain(args: argparse.Namespace) -> int:
+    cfg = load_config(args.config)
+    db_path = resolve_path(cfg.db_path)
+    from litdesk import classifier
+
+    with open_db(db_path) as conn:
+        result = classifier.evaluate_holdout(conn, cfg)
+
+    if result is None:
+        print(
+            f"Not enough ratings yet to evaluate — need >= {cfg.ranker.min_ratings_for_classifier} total, "
+            "with at least 2 thumbs-up and 2 thumbs-down. Digests use the seed-centroid ranking until then."
+        )
+        return 1
+
+    print(f"Held-out accuracy: {result['accuracy']:.1%}  (trained on {result['n_train']}, tested on {result['n_test']})")
+    print(f"  precision={result['precision']:.2f}  recall={result['recall']:.2f}")
+    return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    cfg = load_config(args.config)
+    port = args.port or cfg.server.port
+    import uvicorn
+
+    from litdesk.server import create_app
+
+    app = create_app(cfg)
+    print(f"Serving the digest on http://127.0.0.1:{port} — Ctrl+C to stop.")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="litdesk", description="Personal literature triage agent.")
     parser.add_argument(
@@ -175,6 +208,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="One command, today's digest end to end: ingest + seeds + embed + digest")
     p_run.set_defaults(func=cmd_run)
+
+    p_retrain = sub.add_parser("retrain", help="Phase 3: report held-out classifier accuracy on your ratings so far")
+    p_retrain.set_defaults(func=cmd_retrain)
+
+    p_serve = sub.add_parser("serve", help="Phase 3: serve the digest locally with working thumbs up/down buttons")
+    p_serve.add_argument("--port", type=int, default=None, help="Overrides server.port from config")
+    p_serve.set_defaults(func=cmd_serve)
 
     return parser
 

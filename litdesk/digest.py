@@ -12,7 +12,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from litdesk import ranking
+from litdesk import classifier, ranking
 from litdesk.config import Config, resolve_path
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -60,7 +60,24 @@ def _forced_include_ids(conn, cfg: Config, candidate_ids: list[int], already_sel
     return {r["id"] for r in rows if r["journal"] in journal_set and r["id"] not in already_selected}
 
 
-def build_digest(conn, cfg: Config, method: str = "centroid") -> dict:
+def _rank_candidates(conn, cfg: Config, candidate_ids: list[int]) -> tuple[str, list[ranking.RankedPaper]]:
+    """Trained classifier once there are enough ratings of both kinds
+    (spec section 5, step 2-4); centroid-similarity cold start otherwise.
+    Falls back to centroid if training can't proceed yet (e.g. ratings
+    exist but are all the same label) rather than erroring."""
+    n_rated = len(classifier.get_current_ratings(conn))
+    if n_rated >= cfg.ranker.min_ratings_for_classifier:
+        trained = classifier.train(conn, cfg)
+        if trained is not None:
+            return "classifier", classifier.rank_by_classifier(conn, cfg, candidate_ids, trained)
+
+    seeds = ranking.seed_paper_ids(conn)
+    if not seeds:
+        raise ValueError("No seed papers yet — set seeds.dois in config.yaml and run `litdesk seeds`")
+    return "centroid", ranking.rank_by_centroid(conn, cfg.embeddings.model, candidate_ids, seeds)
+
+
+def build_digest(conn, cfg: Config) -> dict:
     """Ranks today's candidates and persists rankings + a digests row.
     Returns the dict `render_html` expects. Run `litdesk seeds` and
     `litdesk embed` first (or use `litdesk digest`, which chains everything)."""
@@ -70,11 +87,7 @@ def build_digest(conn, cfg: Config, method: str = "centroid") -> dict:
     if not candidate_ids:
         return {"entries": [], "run_date": run_date, "is_catchup": False, "gap_days": 0, "n_candidates_total": 0}
 
-    seeds = ranking.seed_paper_ids(conn)
-    if not seeds:
-        raise ValueError("No seed papers yet — set seeds.dois in config.yaml and run `litdesk seeds`")
-
-    ranked = ranking.rank_by_centroid(conn, cfg.embeddings.model, candidate_ids, seeds)
+    method, ranked = _rank_candidates(conn, cfg, candidate_ids)
     if not ranked:
         raise ValueError(
             "Candidates exist but none have embeddings yet — run `litdesk embed` before `litdesk digest`"
@@ -112,6 +125,7 @@ def build_digest(conn, cfg: Config, method: str = "centroid") -> dict:
             "forced_include": r.paper_id in forced_ids and r.paper_id not in selected_ids,
             "nearest_title": nearest_titles.get(r.nearest_paper_id),
             "nearest_similarity": r.nearest_similarity,
+            "nearest_label": r.nearest_label,
         })
 
     model_version = cfg.embeddings.model
@@ -121,7 +135,7 @@ def build_digest(conn, cfg: Config, method: str = "centroid") -> dict:
             """INSERT INTO rankings (paper_id, run_date, score, method, nearest_paper_id,
                    nearest_similarity, nearest_label, model_version)
                VALUES (?,?,?,?,?,?,?,?)""",
-            (r.paper_id, run_date, r.score, method, r.nearest_paper_id, r.nearest_similarity, "seed", model_version),
+            (r.paper_id, run_date, r.score, method, r.nearest_paper_id, r.nearest_similarity, r.nearest_label, model_version),
         )
     conn.execute(
         "INSERT INTO digests (run_date, paper_ids, model_version, is_catchup, created_at) VALUES (?,?,?,?,?)",
@@ -174,5 +188,6 @@ def render_html(digest_data: dict, output_dir: str | Path) -> Path:
 
 def generate_digest(conn, cfg: Config) -> tuple[Path, dict]:
     data = build_digest(conn, cfg)
+    data["api_base"] = f"http://127.0.0.1:{cfg.server.port}"
     path = render_html(data, resolve_path(cfg.digest.output_dir))
     return path, data

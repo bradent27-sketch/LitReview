@@ -16,7 +16,10 @@ built from — data sources, schema, ranking approach, build phases.
       papers loaded by DOI or BibTeX, candidates ranked by similarity to the
       seed centroid, rendered to a static HTML digest with per-paper
       explainability ("closest to: ...") and score bands.
-- [ ] Phase 3 — Feedback loop (ratings, trained ranker)
+- [x] **Phase 3 — Feedback loop.** `litdesk serve` runs a local FastAPI server
+      with working thumbs up/down buttons in the digest; once you've rated
+      enough papers, a logistic regression classifier takes over from the
+      seed centroid automatically. `litdesk retrain` reports held-out accuracy.
 - [ ] Phase 4 — Claude summaries
 - [ ] Phase 5 — Watchlists, scoop alarm, retraction flags, exports
 
@@ -46,10 +49,19 @@ model weights. Nothing in Phase 1 needs that.
 litdesk ingest      # Phase 1: fetch, dedup, store. Prints fetched/new/deduped per source.
 litdesk seeds       # Phase 2: load seeds.dois / seeds.bibtex_path from config as seed papers
 litdesk embed       # Phase 2: embed every paper missing a vector under the configured model
-litdesk digest      # Phase 2: rank candidates, render today's HTML digest (needs seeds + embeddings)
+litdesk digest      # Phase 2/3: rank candidates, render today's HTML digest (needs seeds + embeddings)
 litdesk run         # ingest + seeds + embed + digest in one shot — the crontab entry
+litdesk serve       # Phase 3: serve the digest at http://127.0.0.1:8000 with working rating buttons
+litdesk retrain     # Phase 3: held-out accuracy of the trained ranker on your ratings so far
 litdesk runs        # Show recent run history (useful after a cron job, or when debugging)
 ```
+
+The digest you open from `litdesk digest`/`litdesk run` is a plain static
+file, so its thumbs up/down buttons only work while `litdesk serve` is also
+running (they POST to `http://127.0.0.1:<server.port>/rate`) — that's the
+one thing in this whole tool that isn't a single command. A natural setup:
+`litdesk run` on a schedule, `litdesk serve` running whenever you're actually
+triaging.
 
 `litdesk seeds` and `litdesk embed` are idempotent no-ops on a rerun once
 everything's loaded, so `litdesk run` is cheap to call on every scheduled
@@ -127,6 +139,30 @@ rated, were never a seed, and never appeared in a previous `digests` row —
 independent of any date window, so a lagged ingest can't cause a repeat or a
 silent drop.
 
+## Feedback loop
+
+`litdesk serve` runs a small local-only FastAPI server (binds `127.0.0.1`,
+not configurable — the `/rate` endpoint has no auth) that serves the latest
+digest and accepts thumbs up/down. Once you've rated at least
+`ranker.min_ratings_for_classifier` papers (default 30, config.yaml) *with
+at least one thumbs-up and one thumbs-down*, `litdesk digest`/`litdesk run`
+automatically switch from centroid ranking to a
+`sklearn.linear_model.LogisticRegression` trained on:
+
+- your thumbs-up as positives
+- your thumbs-down as explicit negatives (weighted higher — a thumbs-down is
+  a much stronger signal than "probably not interesting")
+- `ranker.n_random_negatives` randomly sampled unrated papers as implicit
+  negatives, to regularize the decision boundary
+
+It retrains from scratch on every digest run (seconds, not worth caching)
+and falls back to centroid ranking automatically if training can't proceed
+yet (e.g. you have 30+ ratings but they're all thumbs-up so far). Nearest-
+neighbor explainability switches too: once the classifier is active, "closest
+to" points at your nearest *rated* paper (up or down) instead of a seed.
+`litdesk retrain` reports accuracy/precision/recall on a held-out split of
+your ratings, without affecting the ranker actually used for digests.
+
 ## Offline development
 
 The entire pipeline (minus LLM calls, once Phase 4 lands, and minus the
@@ -161,8 +197,10 @@ litdesk/
   embeddings.py                 # sentence-transformers wrapper, vector <-> BLOB
   seeds.py                       # seed loading from DOIs / BibTeX
   ranking.py                      # cosine similarity to seed centroid + nearest-seed explainability
-  digest.py                        # candidate selection, ranking persistence, HTML rendering
+  classifier.py                    # Phase 3: logistic regression trained on ratings, held-out eval
+  server.py                         # Phase 3: local FastAPI server (digest + /rate endpoint)
+  digest.py                          # candidate selection, ranking persistence, HTML rendering
   templates/
-    digest.html.jinja              # the digest itself
-  cli.py                            # `litdesk` command entrypoint
+    digest.html.jinja                # the digest itself, incl. rating buttons
+  cli.py                              # `litdesk` command entrypoint
 ```

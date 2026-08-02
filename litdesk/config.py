@@ -86,6 +86,13 @@ class RateLimitsConfig:
 
 
 @dataclass
+class ServerConfig:
+    # Always binds 127.0.0.1, not configurable — this serves an unauthenticated
+    # /rate endpoint and has no business being reachable from your LAN.
+    port: int = 8000
+
+
+@dataclass
 class Config:
     db_path: str = "data/litdesk.db"
     cache_dir: str = "data/cache"
@@ -117,6 +124,7 @@ class Config:
     scoop_alarm: ScoopAlarmConfig = field(default_factory=ScoopAlarmConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     rate_limits: RateLimitsConfig = field(default_factory=RateLimitsConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
 
 
 def _merge_into_dataclass(instance: Any, overrides: dict) -> Any:

@@ -61,6 +61,10 @@ digest:
   catchup_gap_days: 3
   catchup_top_n: 15
 
+# `litdesk serve` binds 127.0.0.1 only (not configurable) — only the port is.
+server:
+  port: 8000
+
 watchlists:
   authors: []
   labs: []

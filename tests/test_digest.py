@@ -139,6 +139,57 @@ def test_build_digest_does_not_repeat_papers_across_runs(db_conn, insert_paper, 
     assert second["entries"] == []
 
 
+def test_build_digest_uses_centroid_before_enough_ratings(db_conn, insert_paper, insert_embedding, insert_seed, insert_rating):
+    seed = insert_paper(db_conn, title="Seed")
+    insert_seed(db_conn, seed)
+    insert_embedding(db_conn, seed, [1.0, 0.0], model=MODEL)
+    # A couple of ratings, but nowhere near min_ratings_for_classifier.
+    for i in range(2):
+        pid = insert_paper(db_conn, title=f"Rated {i}")
+        insert_embedding(db_conn, pid, [1.0, 0.0], model=MODEL)
+        insert_rating(db_conn, pid, 1)
+    candidate = insert_paper(db_conn, title="Candidate")
+    insert_embedding(db_conn, candidate, [0.9, 0.1], model=MODEL)
+
+    data = digest.build_digest(db_conn, _cfg())
+    ranking_row = db_conn.execute("SELECT method FROM rankings WHERE paper_id = ?", (candidate,)).fetchone()
+    assert ranking_row["method"] == "centroid"
+    assert data["entries"][0]["nearest_label"] == "seed"
+
+
+def test_build_digest_switches_to_classifier_once_enough_ratings(
+    db_conn, insert_paper, insert_embedding, insert_seed, insert_rating,
+):
+    seed = insert_paper(db_conn, title="Seed")
+    insert_seed(db_conn, seed)
+    insert_embedding(db_conn, seed, [1.0, 0.0], model=MODEL)
+
+    cfg = _cfg()
+    cfg.ranker.min_ratings_for_classifier = 8
+    cfg.ranker.n_random_negatives = 10
+
+    for i in range(4):
+        pid = insert_paper(db_conn, title=f"Up {i}", doi=f"10.1/up{i}")
+        insert_embedding(db_conn, pid, [1.0 - 0.02 * i, 0.02 * i], model=MODEL)
+        insert_rating(db_conn, pid, 1)
+    for i in range(4):
+        pid = insert_paper(db_conn, title=f"Down {i}", doi=f"10.1/down{i}")
+        insert_embedding(db_conn, pid, [0.02 * i, 1.0 - 0.02 * i], model=MODEL)
+        insert_rating(db_conn, pid, -1)
+    for i in range(10):  # unrated pool for random-negative sampling
+        pid = insert_paper(db_conn, title=f"Filler {i}", doi=f"10.1/filler{i}")
+        insert_embedding(db_conn, pid, [0.5, 0.5], model=MODEL)
+
+    candidate = insert_paper(db_conn, title="Looks like the ups", doi="10.1/candidate")
+    insert_embedding(db_conn, candidate, [0.9, 0.1], model=MODEL)
+
+    data = digest.build_digest(db_conn, cfg)
+    ranking_row = db_conn.execute("SELECT method FROM rankings WHERE paper_id = ?", (candidate,)).fetchone()
+    assert ranking_row["method"] == "classifier"
+    entry = next(e for e in data["entries"] if e["id"] == candidate)
+    assert entry["nearest_label"] == "rated_up"
+
+
 def test_render_html_writes_dated_and_latest_files(tmp_path):
     data = {
         "run_date": "2026-08-02",

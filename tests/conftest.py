@@ -86,6 +86,17 @@ def insert_embedding():
 
 
 @pytest.fixture
+def insert_rating():
+    def _insert(conn, paper_id, label, rated_at="2026-01-01T00:00:00"):
+        conn.execute(
+            "INSERT INTO ratings (paper_id, label, rated_at) VALUES (?, ?, ?)",
+            (paper_id, label, rated_at),
+        )
+        conn.commit()
+    return _insert
+
+
+@pytest.fixture
 def insert_seed():
     def _insert(conn, paper_id, note=None):
         import datetime as dt
