@@ -49,6 +49,15 @@
     cursor: pointer; color: #495057; font-size: 0.86rem; user-select: none;
   }
   .abstract { color: #444; font-size: 0.92rem; margin-top: 0.4rem; }
+  .tldr {
+    background: #f6f5f2; border-radius: 6px; padding: 0.55rem 0.75rem;
+    margin-top: 0.4rem; font-size: 0.92rem;
+  }
+  .tldr-relevance { margin-top: 0.3rem; font-size: 0.84rem; color: #6425d0; }
+  @media (prefers-color-scheme: dark) {
+    .tldr { background: #262622; }
+    .tldr-relevance { color: #b79bf5; }
+  }
   .explain { margin-top: 0.5rem; font-size: 0.8rem; color: #888; font-style: italic; }
   .rate { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.4rem; }
   .rate button {
@@ -92,6 +101,12 @@
     {% if e.authors %} &middot; {{ e.authors[:3]|join(", ") }}{% if e.authors|length > 3 %} et al.{% endif %}{% endif %}
     <span class="badge badge-score">score {{ "%.2f"|format(e.score) }}</span>
   </div>
+  {% if e.tldr %}
+  <div class="tldr">
+    <div class="tldr-text">{{ e.tldr }}</div>
+    {% if e.relevance %}<div class="tldr-relevance">{{ e.relevance }}</div>{% endif %}
+  </div>
+  {% endif %}
   {% if e.abstract %}
   <details class="abstract">
     <summary>Abstract</summary>

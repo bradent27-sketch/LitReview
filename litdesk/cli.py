@@ -6,14 +6,26 @@ import argparse
 import logging
 import sys
 
-from litdesk.config import load_config, resolve_path
+from litdesk.config import Config, load_config, resolve_path
 from litdesk.db import open_db
-from litdesk.digest import generate_digest
+from litdesk.digest import build_digest, render_html
 from litdesk.embeddings import embed_missing
 from litdesk.ingest import run_ingest
 from litdesk.seeds import load_seeds_from_config
 
 logger = logging.getLogger("litdesk.cli")
+
+
+def _build_and_render_digest(conn, cfg: Config):
+    """build_digest -> Phase 4 TLDR enrichment (no-op if llm.enabled is
+    false) -> render_html. Shared by cmd_digest and cmd_run."""
+    data = build_digest(conn, cfg)
+    if cfg.llm.enabled:
+        from litdesk.llm.summarize import enrich_digest_entries
+        data = enrich_digest_entries(conn, cfg, data)
+    data["api_base"] = f"http://127.0.0.1:{cfg.server.port}"
+    path = render_html(data, resolve_path(cfg.digest.output_dir))
+    return path, data
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -111,7 +123,7 @@ def cmd_digest(args: argparse.Namespace) -> int:
         load_seeds_from_config(conn, cfg)
         embed_missing(conn, cfg)
         try:
-            path, data = generate_digest(conn, cfg)
+            path, data = _build_and_render_digest(conn, cfg)
         except ValueError as exc:
             print(f"Can't build a digest yet: {exc}", file=sys.stderr)
             return 1
@@ -133,7 +145,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         load_seeds_from_config(conn, cfg)
         embed_missing(conn, cfg)
         try:
-            path, data = generate_digest(conn, cfg)
+            path, data = _build_and_render_digest(conn, cfg)
         except ValueError as exc:
             print(f"Can't build a digest yet: {exc}", file=sys.stderr)
             return 1
@@ -162,6 +174,38 @@ def cmd_retrain(args: argparse.Namespace) -> int:
 
     print(f"Held-out accuracy: {result['accuracy']:.1%}  (trained on {result['n_train']}, tested on {result['n_test']})")
     print(f"  precision={result['precision']:.2f}  recall={result['recall']:.2f}")
+    return 0
+
+
+def cmd_synthesis(args: argparse.Namespace) -> int:
+    """Phase 4: weekly cross-paper synthesis. Meant for a separate weekly
+    cron entry, distinct from the daily `litdesk run`."""
+    cfg = load_config(args.config)
+    if not cfg.llm.enabled:
+        print("llm.enabled is false in config.yaml — nothing to do.", file=sys.stderr)
+        return 1
+
+    import datetime as dt
+
+    from litdesk.llm.summarize import weekly_synthesis_for_recent_digests
+
+    with open_db(resolve_path(cfg.db_path)) as conn:
+        text = weekly_synthesis_for_recent_digests(conn, cfg, days=args.days)
+
+    if text is None:
+        print(
+            "No synthesis produced — either no digests in the lookback window, "
+            "or the LLM call failed (check the log above).",
+            file=sys.stderr,
+        )
+        return 1
+
+    out_dir = resolve_path(cfg.digest.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"synthesis-{dt.date.today().isoformat()}.md"
+    out_path.write_text(text)
+    print(text)
+    print(f"\nWritten to {out_path}")
     return 0
 
 
@@ -215,6 +259,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve = sub.add_parser("serve", help="Phase 3: serve the digest locally with working thumbs up/down buttons")
     p_serve.add_argument("--port", type=int, default=None, help="Overrides server.port from config")
     p_serve.set_defaults(func=cmd_serve)
+
+    p_synthesis = sub.add_parser("synthesis", help="Phase 4: weekly cross-paper synthesis (needs llm.enabled)")
+    p_synthesis.add_argument("--days", type=int, default=7, help="Lookback window in days (default 7)")
+    p_synthesis.set_defaults(func=cmd_synthesis)
 
     return parser
 

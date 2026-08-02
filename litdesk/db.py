@@ -78,7 +78,9 @@ CREATE TABLE IF NOT EXISTS rankings (
     nearest_paper_id INTEGER REFERENCES papers(id),
     nearest_similarity REAL,
     nearest_label TEXT,               -- 'seed' | 'rated_up' | 'rated_down'
-    model_version TEXT
+    model_version TEXT,
+    tldr TEXT,                        -- Phase 4: Claude-generated two-sentence summary
+    tldr_relevance TEXT                -- Phase 4: one line on why it's relevant
 );
 CREATE INDEX IF NOT EXISTS idx_rankings_run_date ON rankings(run_date);
 CREATE INDEX IF NOT EXISTS idx_rankings_paper_id ON rankings(paper_id);

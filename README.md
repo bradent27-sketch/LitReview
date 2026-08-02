@@ -20,7 +20,12 @@ built from — data sources, schema, ranking approach, build phases.
       with working thumbs up/down buttons in the digest; once you've rated
       enough papers, a logistic regression classifier takes over from the
       seed centroid automatically. `litdesk retrain` reports held-out accuracy.
-- [ ] Phase 4 — Claude summaries
+- [x] **Phase 4 — Claude summaries.** Off by default (`llm.enabled: false`).
+      When on: a two-sentence TLDR + one-line relevance note for the top N
+      papers in each digest (`claude-haiku-4-5-20251001`), plus a
+      `litdesk synthesis` command for a weekly cross-paper synthesis
+      (`claude-sonnet-5`). Every LLM call degrades to "skip it" on any
+      failure — a bad key or a rate limit never breaks a digest run.
 - [ ] Phase 5 — Watchlists, scoop alarm, retraction flags, exports
 
 ## Setup
@@ -53,6 +58,7 @@ litdesk digest      # Phase 2/3: rank candidates, render today's HTML digest (ne
 litdesk run         # ingest + seeds + embed + digest in one shot — the crontab entry
 litdesk serve       # Phase 3: serve the digest at http://127.0.0.1:8000 with working rating buttons
 litdesk retrain     # Phase 3: held-out accuracy of the trained ranker on your ratings so far
+litdesk synthesis   # Phase 4: weekly cross-paper synthesis (needs llm.enabled: true) — a separate weekly cron entry
 litdesk runs        # Show recent run history (useful after a cron job, or when debugging)
 ```
 
@@ -163,12 +169,35 @@ to" points at your nearest *rated* paper (up or down) instead of a seed.
 `litdesk retrain` reports accuracy/precision/recall on a held-out split of
 your ratings, without affecting the ranker actually used for digests.
 
+## Claude summaries
+
+Off by default (`llm.enabled: false` in config.yaml — flip it on, and set an
+`ANTHROPIC_API_KEY`; `uv pip install -e ".[llm]"` if you skipped the extra at
+setup). When enabled, `litdesk digest`/`litdesk run` ask
+`claude-haiku-4-5-20251001` for a two-sentence plain-language TLDR plus a
+one-line relevance note for the top `llm.tldr_top_n` (default 10) papers in
+each digest — cheap enough for daily, per-paper volume. Both are stored in
+`rankings` alongside the score, so they survive independent of the rendered
+HTML. `litdesk synthesis` (a separate weekly cron entry, not part of `litdesk
+run`) asks `claude-sonnet-5` for a short synthesis across the last week's
+ranked papers — themes, contradictions, anything worth reading in full —
+and writes it to `digests/synthesis-<date>.md`.
+
+Every LLM call is wrapped so a failure degrades to "skip it," never a hard
+error: no `anthropic` package installed, no resolvable API key, a rate limit,
+a network blip — any of these just mean that paper's TLDR (or that week's
+synthesis) doesn't happen, logged as a warning. A digest run never fails
+because of the LLM layer. `llm.provider: claude_code` (billing through a
+Claude Pro/Max subscription via `claude -p` instead of a metered API key) is
+in config as a placeholder for the option the spec raised, but isn't wired up
+yet — see the open questions below.
+
 ## Offline development
 
-The entire pipeline (minus LLM calls, once Phase 4 lands, and minus the
-one-time model weight download) runs against on-disk cached data, so you can
-develop without network access. Run the test suite instead of hitting live
-APIs or loading the real embedding model:
+The entire pipeline (minus LLM calls and minus the one-time model weight
+download) runs against on-disk cached data, so you can develop without
+network access. Run the test suite instead of hitting live APIs or loading
+the real embedding model:
 
 ```bash
 pytest
@@ -201,6 +230,9 @@ litdesk/
   server.py                         # Phase 3: local FastAPI server (digest + /rate endpoint)
   digest.py                          # candidate selection, ranking persistence, HTML rendering
   templates/
-    digest.html.jinja                # the digest itself, incl. rating buttons
-  cli.py                              # `litdesk` command entrypoint
+    digest.html.jinja                # the digest itself, incl. rating buttons and TLDRs
+  llm/
+    client.py                          # Phase 4: Anthropic client, never raises — returns None on any failure
+    summarize.py                        # per-paper TLDR + weekly synthesis
+  cli.py                                # `litdesk` command entrypoint
 ```

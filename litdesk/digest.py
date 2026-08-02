@@ -13,7 +13,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from litdesk import classifier, ranking
-from litdesk.config import Config, resolve_path
+from litdesk.config import Config
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -184,10 +184,3 @@ def render_html(digest_data: dict, output_dir: str | Path) -> Path:
     out_path.write_text(html)
     (output_dir / "latest.html").write_text(html)
     return out_path
-
-
-def generate_digest(conn, cfg: Config) -> tuple[Path, dict]:
-    data = build_digest(conn, cfg)
-    data["api_base"] = f"http://127.0.0.1:{cfg.server.port}"
-    path = render_html(data, resolve_path(cfg.digest.output_dir))
-    return path, data
