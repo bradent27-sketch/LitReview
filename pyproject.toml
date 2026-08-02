@@ -1,0 +1,44 @@
+[project]
+name = "litdesk"
+version = "0.1.0"
+description = "Personal literature triage agent for biochemistry — daily digest ranked by learned interest."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "scikit-learn>=1.4",
+    "numpy>=1.26",
+    "sentence-transformers>=3.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+litdesk = "litdesk.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["litdesk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# This is a CPU-only tool (spec: "sentence-transformers ... run locally on
+# CPU") — pull the CPU-only torch build instead of the CUDA one, which is
+# ~2GB smaller and much faster to install on a laptop with no GPU.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

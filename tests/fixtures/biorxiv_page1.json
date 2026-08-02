@@ -1,0 +1,29 @@
+{
+  "messages": [{"status": "ok", "total": "2", "cursor": "0", "count": 2}],
+  "collection": [
+    {
+      "doi": "10.1101/2026.05.01.500123",
+      "title": "Chaperone-assisted folding kinetics under thermal stress",
+      "authors": "Lin, C.; Ahmed, F.",
+      "author_corresponding": "Lin, C.",
+      "date": "2026-05-01",
+      "category": "biochemistry",
+      "abstract": "Preprint abstract about chaperone-assisted folding.",
+      "published": "NA",
+      "server": "biorxiv",
+      "version": "1"
+    },
+    {
+      "doi": "10.1101/2026.04.15.499999",
+      "title": "A second unrelated preprint on lipid membranes",
+      "authors": "Kapoor, S.",
+      "author_corresponding": "Kapoor, S.",
+      "date": "2026-04-15",
+      "category": "biophysics",
+      "abstract": "Membrane biophysics abstract.",
+      "published": "NA",
+      "server": "biorxiv",
+      "version": "1"
+    }
+  ]
+}

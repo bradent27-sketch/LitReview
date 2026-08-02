@@ -1,0 +1,125 @@
+# LitDesk config. Copy this file to config/config.yaml (gitignored, since it's
+# personal) and edit. Any field you omit falls back to the default in
+# litdesk/config.py, so keep this file to just what you're overriding.
+
+# --- Open decision #1: your standing queries -------------------------------
+# Europe PMC query syntax (Lucene-ish, case-sensitive field names). Prototype
+# each one at https://europepmc.org/advancesearch before dropping it here.
+# The three below are placeholders so the pipeline runs out of the box —
+# replace them with your actual topics/techniques/proteins/pathways.
+queries:
+  - 'ABSTRACT:"enzyme kinetics" AND ABSTRACT:mechanism'
+  - 'ABSTRACT:"protein folding" AND ABSTRACT:chaperone'
+  - 'MESH:"Protein Kinases" AND ABSTRACT:structure'
+
+lookback_days: 7
+
+# Restrict bioRxiv/medRxiv polling to specific categories (underscores for
+# spaces, e.g. "biochemistry", "biophysics"). Empty = no filter.
+biorxiv_categories: []
+
+# --- Open decision #2: journals to always surface regardless of score ------
+journals_always_include: []
+  # - "Nature"
+  # - "Cell"
+  # - "Journal of Biological Chemistry"
+
+# One paragraph on what you're actively working on. Powers the Phase 5 scoop
+# alarm (flags anything unusually close to this). Leave blank to disable.
+project_description: ""
+
+sources:
+  europepmc: true
+  biorxiv: true
+  medrxiv: false
+
+# --- Open decision #5: seed papers for cold-start ranking -------------------
+# Either list DOIs directly, or point bibtex_path at a Zotero/Paperpile
+# export and run `litdesk seeds import-bibtex <path>` to pull DOIs from it.
+# Spec recommends 30-60 papers: your own pubs, your lab's, quals reading list,
+# key papers from your intro section.
+seeds:
+  dois: []
+  bibtex_path: null
+
+embeddings:
+  model: sentence-transformers/all-MiniLM-L6-v2
+  metric: cosine
+  batch_size: 32
+
+ranker:
+  min_ratings_for_classifier: 30
+  n_random_negatives: 5000
+  weight_positive: 1.0
+  weight_explicit_negative: 3.0
+  weight_random_negative: 1.0
+  held_out_fraction: 0.2
+
+digest:
+  top_n: 25
+  output_dir: digests
+  catchup_gap_days: 3
+  catchup_top_n: 15
+
+# `litdesk serve` binds 127.0.0.1 only (not configurable) — only the port is.
+server:
+  port: 8000
+
+# Papers by a watchlisted author are always included in the digest, tagged
+# "watchlist: <name>" — matched case-insensitively as a substring against
+# each paper's stored author strings (e.g. "smith" matches "Smith JA" and
+# "Smith, J."). `labs` is reserved for affiliation-based matching, not
+# wired up yet — affiliation strings aren't normalized enough across
+# sources to match reliably.
+watchlists:
+  authors: []
+  labs: []
+
+scoop_alarm:
+  enabled: false
+  threshold: 0.9
+
+# --- Open decision #6: LLM summaries (Phase 4) ------------------------------
+# provider: "api" bills per token against ANTHROPIC_API_KEY. "claude_code"
+# shells out to `claude -p` per paper and bills against your Claude Code
+# subscription instead — no API key needed, just the `claude` CLI on PATH
+# and being logged in. Each call reloads the full Claude Code system prompt
+# (tens of thousands of tokens against your usage limits before the actual
+# TLDR), so if you're on a metered/limited plan, watch usage for the first
+# few days and drop tldr_top_n if it's eating too much.
+llm:
+  enabled: true
+  provider: claude_code
+  tldr_model: claude-haiku-4-5-20251001
+  synthesis_model: claude-sonnet-5
+  tldr_top_n: 10
+  claude_code_timeout_seconds: 120
+
+# --- Email delivery of the digest, in addition to the local HTML file ------
+# Off by default: smtp_host/smtp_username/from_addr/to_addr below are
+# personal and can't be filled in for you. Also set the LITDESK_SMTP_PASSWORD
+# env var (never put a password in this file) — for Gmail, use an App
+# Password (myaccount.google.com/apppasswords), not your normal password.
+# Example for Gmail:
+#   smtp_host: smtp.gmail.com
+#   smtp_port: 587
+#   smtp_username: you@gmail.com
+#   from_addr: you@gmail.com
+#   to_addr: you@gmail.com
+email:
+  enabled: false
+  smtp_host: ""
+  smtp_port: 587
+  smtp_username: ""
+  use_tls: true
+  from_addr: ""
+  to_addr: ""
+
+rate_limits:
+  europepmc_per_sec: 3.0
+  biorxiv_per_sec: 1.0
+
+db_path: data/litdesk.db
+cache_dir: data/cache
+cache_ttl_hours: 24
+log_dir: data/logs

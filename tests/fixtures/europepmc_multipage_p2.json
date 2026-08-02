@@ -1,0 +1,18 @@
+{
+  "hitCount": 2,
+  "nextCursorMark": "PAGE2",
+  "resultList": {
+    "result": [
+      {
+        "id": "2", "source": "MED", "pmid": "2", "doi": "10.1000/bbb",
+        "title": "Paper B", "authorString": "Beta B",
+        "authorList": {"author": [{"fullName": "Beta B"}]},
+        "journalInfo": {"journal": {"title": "J2"}},
+        "pubYear": "2026", "firstPublicationDate": "2026-07-02",
+        "abstractText": "Abstract B.",
+        "meshHeadingList": {"meshHeading": []},
+        "fullTextUrlList": {"fullTextUrl": []}
+      }
+    ]
+  }
+}

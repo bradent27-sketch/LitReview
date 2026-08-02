@@ -1,0 +1,82 @@
+{
+  "version": "6.9",
+  "hitCount": 3,
+  "nextCursorMark": "AoJw0234abc",
+  "request": {"queryString": "test", "pageSize": 100},
+  "resultList": {
+    "result": [
+      {
+        "id": "38111111",
+        "source": "MED",
+        "pmid": "38111111",
+        "pmcid": "PMC10111111",
+        "doi": "10.1016/j.jbc.2026.100001",
+        "title": "Kinetic mechanism of a biochemical enzyme",
+        "authorString": "Doe J, Roe R, Smith AB",
+        "authorList": {
+          "author": [
+            {"fullName": "Doe J", "firstName": "J", "lastName": "Doe"},
+            {"fullName": "Roe R", "firstName": "R", "lastName": "Roe"},
+            {"fullName": "Smith AB", "firstName": "AB", "lastName": "Smith"}
+          ]
+        },
+        "journalInfo": {"journal": {"title": "Journal of Biological Chemistry"}},
+        "pubYear": "2026",
+        "firstPublicationDate": "2026-07-28",
+        "abstractText": "We characterize the kinetic mechanism of a model enzyme using stopped-flow spectroscopy.",
+        "meshHeadingList": {
+          "meshHeading": [
+            {"descriptorName": "Enzymes"},
+            {"descriptorName": "Kinetics"}
+          ]
+        },
+        "fullTextUrlList": {
+          "fullTextUrl": [
+            {"documentStyle": "html", "url": "https://europepmc.org/article/MED/38111111"},
+            {"documentStyle": "pdf", "url": "https://europepmc.org/articles/PMC10111111/pdf"}
+          ]
+        },
+        "pubTypeList": {"pubType": ["Journal Article"]}
+      },
+      {
+        "id": "PPR555555",
+        "source": "PPR",
+        "pmid": null,
+        "pmcid": null,
+        "doi": "10.1101/2026.06.01.500001",
+        "title": "A preprint on chaperone-mediated protein folding",
+        "authorString": "Lin C, Ahmed F",
+        "authorList": {
+          "author": [
+            {"fullName": "Lin C"},
+            {"fullName": "Ahmed F"}
+          ]
+        },
+        "journalInfo": {},
+        "pubYear": "2026",
+        "firstPublicationDate": "2026-06-01",
+        "abstractText": "A study of chaperone proteins assisting folding under heat stress.",
+        "meshHeadingList": {"meshHeading": []},
+        "fullTextUrlList": {"fullTextUrl": []},
+        "pubTypeList": {"pubType": ["preprint"]}
+      },
+      {
+        "id": "38222222",
+        "source": "MED",
+        "pmid": "38222222",
+        "pmcid": null,
+        "doi": "10.1038/s41586-026-00002-0",
+        "title": "Retracted article: structure of a mislabeled kinase",
+        "authorString": "Nguyen T",
+        "authorList": {"author": [{"fullName": "Nguyen T"}]},
+        "journalInfo": {"journal": {"title": "Nature"}},
+        "pubYear": "2026",
+        "firstPublicationDate": "2026-07-20",
+        "abstractText": "This article has been retracted by the authors.",
+        "meshHeadingList": {"meshHeading": [{"descriptorName": "Protein Kinases"}]},
+        "fullTextUrlList": {"fullTextUrl": []},
+        "pubTypeList": {"pubType": ["Journal Article", "Retracted Publication"]}
+      }
+    ]
+  }
+}
