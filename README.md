@@ -33,12 +33,21 @@ built from — data sources, schema, ranking approach, build phases.
       with working thumbs up/down buttons in the digest; once you've rated
       enough papers, a logistic regression classifier takes over from the
       seed centroid automatically. `litdesk retrain` reports held-out accuracy.
-- [x] **Phase 4 — Claude summaries.** Off by default (`llm.enabled: false`).
-      When on: a two-sentence TLDR + one-line relevance note for the top N
-      papers in each digest (`claude-haiku-4-5-20251001`), plus a
-      `litdesk synthesis` command for a weekly cross-paper synthesis
-      (`claude-sonnet-5`). Every LLM call degrades to "skip it" on any
-      failure — a bad key or a rate limit never breaks a digest run.
+- [x] **Phase 4 — Claude summaries.** On by default in
+      `config.example.yaml` (`llm.enabled: true`) — a two-sentence TLDR +
+      one-line relevance note for the top N papers in each digest
+      (`claude-haiku-4-5-20251001`), plus a `litdesk synthesis` command for
+      a weekly cross-paper synthesis (`claude-sonnet-5`). Two billing
+      providers behind `llm.provider`: `claude_code` (default) shells out
+      to `claude -p` per call and bills your Claude Code subscription; `api`
+      bills a metered `ANTHROPIC_API_KEY` instead. Every LLM call degrades
+      to "skip it" on any failure — a bad key, a rate limit, or `claude`
+      missing from PATH never breaks a digest run.
+- [x] **Email delivery (beyond spec).** Off by default — opt in with
+      `email.enabled` + SMTP settings in config.yaml. `litdesk digest`/
+      `litdesk run` send the same rendered HTML as the local file, right
+      after writing it, with the same "never break the digest run" failure
+      contract as the LLM layer.
 - [x] **Phase 5 — high-value extras.** Author watchlists and a scoop alarm
       always force a paper into the digest regardless of score; retraction/
       correction flags (from metadata you've already ingested — no extra API
@@ -56,7 +65,7 @@ Requires Python 3.11+.
 ```bash
 uv venv --python 3.11
 source .venv/bin/activate
-uv pip install -e ".[dev,llm]"   # drop `llm` if you don't want the Anthropic SDK yet
+uv pip install -e ".[dev,llm]"   # drop `llm` if staying on the claude_code provider (default) — that extra only installs the Anthropic SDK, needed for llm.provider: api
 
 litdesk init      # writes config/config.yaml from the example template
 ```
@@ -68,6 +77,13 @@ papers you already care about (see "Configuration" below).
 **First run note:** the first `litdesk embed` (or `litdesk digest`/`litdesk
 run`, which call it for you) downloads a few hundred MB of sentence-transformers
 model weights. Nothing in Phase 1 needs that.
+
+**Claude summaries are on by default** (`llm.provider: claude_code` in
+`config.example.yaml`), billed through a `claude -p` subprocess against your
+Claude Code subscription — no API key needed, just the `claude` CLI on PATH
+and already logged in (if running `claude` directly in your terminal works,
+this will too). See "Claude summaries" below for the other provider option
+and a usage-cost caveat worth reading before your first scheduled run.
 
 ## Usage
 
@@ -252,26 +268,73 @@ your ratings, without affecting the ranker actually used for digests.
 
 ## Claude summaries
 
-Off by default (`llm.enabled: false` in config.yaml — flip it on, and set an
-`ANTHROPIC_API_KEY`; `uv pip install -e ".[llm]"` if you skipped the extra at
-setup). When enabled, `litdesk digest`/`litdesk run` ask
-`claude-haiku-4-5-20251001` for a two-sentence plain-language TLDR plus a
-one-line relevance note for the top `llm.tldr_top_n` (default 10) papers in
-each digest — cheap enough for daily, per-paper volume. Both are stored in
+On by default in `config.example.yaml` (`llm.enabled: true`). When enabled,
+`litdesk digest`/`litdesk run` ask `claude-haiku-4-5-20251001` for a
+two-sentence plain-language TLDR plus a one-line relevance note for the top
+`llm.tldr_top_n` (default 10) papers in each digest. Both are stored in
 `rankings` alongside the score, so they survive independent of the rendered
 HTML. `litdesk synthesis` (a separate weekly cron entry, not part of `litdesk
 run`) asks `claude-sonnet-5` for a short synthesis across the last week's
 ranked papers — themes, contradictions, anything worth reading in full —
 and writes it to `digests/synthesis-<date>.md`.
 
+Two providers, chosen via `llm.provider`:
+
+- **`claude_code`** (default) — shells out to `claude -p "<prompt>" --model
+  <model> --output-format json` per call and reads the response from the
+  JSON `.result` field, so it bills against your Claude Code subscription
+  instead of a metered API key. Needs the `claude` CLI on PATH and already
+  logged in — nothing else to configure. **Cost/usage caveat:** each `-p`
+  call is a fresh subprocess that re-sends Claude Code's full system prompt
+  (~26k tokens of cache-creation observed in testing a single trivial
+  call); Anthropic's prompt caching means calls close together should
+  mostly hit cache reads rather than paying that cost every time, but if
+  you're on a usage-capped plan it's worth watching for the first few days
+  and lowering `tldr_top_n` (or turning off `synthesis`) if it's eating too
+  much. There's no documented flag to fully disable tool use in `-p` mode,
+  but TLDR/synthesis prompts are pure text-summarization requests with
+  nothing to act on, so this hasn't been an issue in practice. Timeout is
+  `llm.claude_code_timeout_seconds` (default 120s per call, enforced from
+  the Python side since the CLI has no per-call timeout flag).
+- **`api`** — the direct Anthropic SDK, billed per token against
+  `ANTHROPIC_API_KEY`. Set the env var and `uv pip install -e ".[llm]"` if
+  you skipped the extra at setup.
+
 Every LLM call is wrapped so a failure degrades to "skip it," never a hard
-error: no `anthropic` package installed, no resolvable API key, a rate limit,
-a network blip — any of these just mean that paper's TLDR (or that week's
-synthesis) doesn't happen, logged as a warning. A digest run never fails
-because of the LLM layer. `llm.provider: claude_code` (billing through a
-Claude Pro/Max subscription via `claude -p` instead of a metered API key) is
-in config as a placeholder for the option the spec raised, but isn't wired up
-yet — see the open questions below.
+error: no `anthropic` package installed, no resolvable API key, `claude`
+missing from PATH, a non-zero exit, a timeout, a rate limit, a network blip
+— any of these just mean that paper's TLDR (or that week's synthesis)
+doesn't happen, logged as a warning. A digest run never fails because of the
+LLM layer.
+
+## Email delivery
+
+Off by default (`email.enabled: false`) — SMTP host, username, and addresses
+are personal, so they're left blank in `config.example.yaml`. To turn it on,
+set in `config.yaml`:
+
+```yaml
+email:
+  enabled: true
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  smtp_username: you@gmail.com
+  use_tls: true
+  from_addr: you@gmail.com
+  to_addr: you@gmail.com
+```
+
+and set the `LITDESK_SMTP_PASSWORD` environment variable — never put a
+password in `config.yaml`, same convention as `ANTHROPIC_API_KEY`. For
+Gmail, generate an [App Password](https://myaccount.google.com/apppasswords)
+rather than using your normal password (required once 2FA is on, and works
+even if you don't otherwise use one).
+
+`litdesk digest`/`litdesk run` email the rendered digest HTML right after
+writing it locally — same content, sent as the message body — but only when
+the digest has at least one paper in it. Like the LLM layer, any failure
+(bad credentials, unreachable host, timeout) logs a warning and skips the
+email rather than failing the digest run.
 
 ## Phase 5 extras
 
@@ -326,18 +389,17 @@ working end-to-end pipeline — but these are the things only you can decide:
    default; add any you want surfaced regardless of score.
 3. **Digest frequency** — daily vs. weekdays-only is purely a choice of
    which cron line you use (see "Scheduling") — no code difference.
-4. **Delivery: browser, email, or both** — browser is what's built (a
-   static HTML file, plus `litdesk serve` for the rating buttons). Email
-   would need SMTP credentials from you to wire up.
+4. **Delivery: browser, email, or both** — both. Browser is the static
+   HTML file (plus `litdesk serve` for the rating buttons); email is opt-in
+   via `email.enabled` + your SMTP settings (see "Email delivery").
 5. **Seed paper format** — both a DOI list (`seeds.dois`) and a BibTeX
    export (`seeds.bibtex_path`, e.g. from Zotero/Paperpile) are implemented.
    A folder of PDFs is not (it would need PDF text extraction + DOI lookup
    by title — a bigger lift, and lower-confidence matching).
-6. **Claude billing: API key or `claude -p`** — only the direct API key
-   path (`llm.provider: api`) is implemented, off by default. `claude -p`
-   billing was flagged in the spec as having an uncertain future (a move to
-   a separate monthly credit was announced for `claude -p`/Agent SDK usage,
-   then paused) — happy to build that path too if you'd rather go that route.
+6. **Claude billing: API key or `claude -p`** — both implemented, chosen via
+   `llm.provider`. Defaults to `claude_code` (bills your Claude Code
+   subscription via `claude -p`) in `config.example.yaml`; switch to `api`
+   for metered `ANTHROPIC_API_KEY` billing instead.
 
 ## Offline development
 
@@ -379,9 +441,10 @@ litdesk/
   templates/
     digest.html.jinja                # the digest itself, incl. rating buttons and TLDRs
   llm/
-    client.py                          # Phase 4: Anthropic client, never raises — returns None on any failure
+    client.py                          # Phase 4: Anthropic API + claude_code (`claude -p`) clients, never raise
     summarize.py                        # per-paper TLDR + weekly synthesis
   retractions.py                         # Phase 5: retraction/correction flags from stored raw metadata
   export.py                               # Phase 5: BibTeX export of thumbed-up papers
-  cli.py                                    # `litdesk` command entrypoint
+  email_digest.py                          # optional SMTP delivery of the rendered digest
+  cli.py                                     # `litdesk` command entrypoint
 ```

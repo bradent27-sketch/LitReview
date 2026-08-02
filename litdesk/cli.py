@@ -18,13 +18,18 @@ logger = logging.getLogger("litdesk.cli")
 
 def _build_and_render_digest(conn, cfg: Config):
     """build_digest -> Phase 4 TLDR enrichment (no-op if llm.enabled is
-    false) -> render_html. Shared by cmd_digest and cmd_run."""
+    false) -> render_html -> optional email delivery (no-op if
+    email.enabled is false). Shared by cmd_digest and cmd_run."""
     data = build_digest(conn, cfg)
     if cfg.llm.enabled:
         from litdesk.llm.summarize import enrich_digest_entries
         data = enrich_digest_entries(conn, cfg, data)
     data["api_base"] = f"http://127.0.0.1:{cfg.server.port}"
     path = render_html(data, resolve_path(cfg.digest.output_dir))
+    if cfg.email.enabled and data["entries"]:
+        from litdesk.email_digest import send_digest_email
+        subject = f"LitDesk digest — {data['run_date']} ({len(data['entries'])} papers)"
+        send_digest_email(cfg, subject, path.read_text())
     return path, data
 
 

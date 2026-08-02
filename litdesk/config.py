@@ -77,6 +77,10 @@ class LLMConfig:
     tldr_model: str = "claude-haiku-4-5-20251001"
     synthesis_model: str = "claude-sonnet-5"
     tldr_top_n: int = 10
+    # Only used by provider="claude_code" — each TLDR/synthesis call is a
+    # separate `claude -p` subprocess with no CLI-level timeout flag, so
+    # this is enforced from the Python side instead.
+    claude_code_timeout_seconds: int = 120
 
 
 @dataclass
@@ -90,6 +94,20 @@ class ServerConfig:
     # Always binds 127.0.0.1, not configurable — this serves an unauthenticated
     # /rate endpoint and has no business being reachable from your LAN.
     port: int = 8000
+
+
+@dataclass
+class EmailConfig:
+    # Off by default — needs smtp_host/username/from_addr/to_addr filled in
+    # below, plus the LITDESK_SMTP_PASSWORD env var set (never stored in
+    # config.yaml, same convention as ANTHROPIC_API_KEY for the LLM layer).
+    enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    use_tls: bool = True  # STARTTLS on the port above — what Gmail/most providers expect on 587
+    from_addr: str = ""
+    to_addr: str = ""
 
 
 @dataclass
@@ -125,6 +143,7 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     rate_limits: RateLimitsConfig = field(default_factory=RateLimitsConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    email: EmailConfig = field(default_factory=EmailConfig)
 
 
 def _merge_into_dataclass(instance: Any, overrides: dict) -> Any:

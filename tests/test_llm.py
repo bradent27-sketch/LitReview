@@ -1,4 +1,8 @@
+import json
+import subprocess
 import sys
+
+import pytest
 
 from litdesk.config import Config
 from litdesk.llm import client as llm_client
@@ -44,8 +48,23 @@ def _cfg(**overrides):
 
 def test_get_client_returns_none_for_unimplemented_provider():
     cfg = _cfg()
+    cfg.llm.provider = "bogus"
+    assert llm_client.get_client(cfg) is None
+
+
+def test_get_client_claude_code_returns_none_when_cli_not_on_path(monkeypatch):
+    monkeypatch.setattr(llm_client.shutil, "which", lambda name: None)
+    cfg = _cfg()
     cfg.llm.provider = "claude_code"
     assert llm_client.get_client(cfg) is None
+
+
+def test_get_client_claude_code_returns_client_when_cli_found(monkeypatch):
+    monkeypatch.setattr(llm_client.shutil, "which", lambda name: "/usr/bin/claude")
+    cfg = _cfg()
+    cfg.llm.provider = "claude_code"
+    client = llm_client.get_client(cfg)
+    assert isinstance(client, llm_client.ClaudeCodeClient)
 
 
 def test_get_client_returns_none_when_sdk_not_installed(monkeypatch):
@@ -61,6 +80,100 @@ def test_get_client_returns_none_when_construction_fails(monkeypatch):
 
     monkeypatch.setattr(anthropic, "Anthropic", boom)
     assert llm_client.get_client(_cfg()) is None
+
+
+# --- ClaudeCodeClient (the `claude -p` subprocess path) ---
+
+class FakeCompletedProcess:
+    def __init__(self, stdout="", stderr="", returncode=0):
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+def test_claude_code_create_returns_response_on_success(monkeypatch):
+    payload = json.dumps({"is_error": False, "result": "Summary text."})
+    monkeypatch.setattr(llm_client.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout=payload))
+
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+    response = client.messages.create(model="claude-haiku-4-5-20251001", messages=[{"role": "user", "content": "hi"}])
+
+    assert response.content[0].text == "Summary text."
+    assert response.content[0].type == "text"
+
+
+def test_claude_code_create_passes_prompt_and_model_as_flags(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return FakeCompletedProcess(stdout=json.dumps({"is_error": False, "result": "ok"}))
+
+    monkeypatch.setattr(llm_client.subprocess, "run", fake_run)
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+    client.messages.create(model="claude-sonnet-5", messages=[{"role": "user", "content": "summarize this"}])
+
+    cmd = captured["cmd"]
+    assert cmd[0] == "/usr/bin/claude"
+    assert "-p" in cmd and "summarize this" in cmd
+    assert "--model" in cmd and "claude-sonnet-5" in cmd
+    assert "--output-format" in cmd and "json" in cmd
+
+
+def test_claude_code_create_raises_on_nonzero_exit(monkeypatch):
+    payload = json.dumps({"is_error": True, "result": "There's an issue with the selected model."})
+    monkeypatch.setattr(llm_client.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout=payload, returncode=1))
+
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+    with pytest.raises(RuntimeError):
+        client.messages.create(model="bad-model", messages=[{"role": "user", "content": "hi"}])
+
+
+def test_claude_code_create_raises_on_is_error_even_with_zero_exit(monkeypatch):
+    payload = json.dumps({"is_error": True, "result": "denied"})
+    monkeypatch.setattr(llm_client.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout=payload, returncode=0))
+
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+    with pytest.raises(RuntimeError):
+        client.messages.create(model="m", messages=[{"role": "user", "content": "hi"}])
+
+
+def test_claude_code_create_raises_on_non_json_output(monkeypatch):
+    monkeypatch.setattr(llm_client.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout="not json"))
+
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+    with pytest.raises(RuntimeError):
+        client.messages.create(model="m", messages=[{"role": "user", "content": "hi"}])
+
+
+def test_claude_code_create_raises_on_empty_result(monkeypatch):
+    payload = json.dumps({"is_error": False, "result": ""})
+    monkeypatch.setattr(llm_client.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout=payload))
+
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+    with pytest.raises(RuntimeError):
+        client.messages.create(model="m", messages=[{"role": "user", "content": "hi"}])
+
+
+def test_claude_code_create_propagates_timeout(monkeypatch):
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
+
+    monkeypatch.setattr(llm_client.subprocess, "run", boom)
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+    with pytest.raises(subprocess.TimeoutExpired):
+        client.messages.create(model="m", messages=[{"role": "user", "content": "hi"}])
+
+
+def test_summarize_paper_via_claude_code_client_degrades_gracefully_on_failure(monkeypatch):
+    """End-to-end through the real public function: a raising ClaudeCodeClient
+    must be handled by summarize_paper's existing except-Exception, exactly
+    like an Anthropic API error, per llm/client.py's provider-agnostic contract."""
+    monkeypatch.setattr(llm_client.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout="not json"))
+    client = llm_client.ClaudeCodeClient("/usr/bin/claude", 60)
+
+    result = summarize.summarize_paper(client, _cfg(), "Title", "Abstract", "Journal", "biochemistry")
+    assert result is None
 
 
 # --- summarize_paper ---
