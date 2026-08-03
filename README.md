@@ -57,11 +57,17 @@ built from — data sources, schema, ranking approach, build phases.
       export` writes BibTeX of everything thumbed up. `litdesk notifications`
       surfaces all of the above in one place. ("Citing paper X" watchlists
       and lab/affiliation matching aren't wired up — see the open questions.)
+- [x] **Web control panel (beyond spec).** `litdesk serve` now also serves a
+      Settings page (every field above as a form, saved straight to
+      config.yaml — no hand-editing needed) and a Control Panel (a "Run now"
+      button with a live log, recent run history, notifications, and buttons
+      for retrain/export/check-retractions/synthesis) — see "Web control panel".
 
 ## Setup
 
-Requires Python 3.11+.
+Requires Python 3.11+ and [`uv`](https://docs.astral.sh/uv/getting-started/installation/).
 
+**macOS/Linux:**
 ```bash
 uv venv --python 3.11
 source .venv/bin/activate
@@ -70,13 +76,33 @@ uv pip install -e ".[dev,llm]"   # drop `llm` if staying on the claude_code prov
 litdesk init      # writes config/config.yaml from the example template
 ```
 
-Then edit `config/config.yaml` — at minimum, replace the placeholder
-`queries` with your actual standing topics, and set `seeds.dois` to 30-60
-papers you already care about (see "Configuration" below).
+**Windows (PowerShell):**
+```powershell
+# If `uv` isn't installed yet:
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+# then close and reopen PowerShell so PATH picks it up
+
+uv venv --python 3.11
+# If activation silently does nothing, PowerShell is blocking the script — run once:
+#   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.venv\Scripts\Activate.ps1
+uv pip install -e ".[dev,llm]"
+
+litdesk init
+```
+(If `litdesk` isn't found afterward, the venv likely isn't active — check for
+a `(.venv)` prefix on your prompt, or just call `.venv\Scripts\litdesk.exe`
+directly, which works regardless of activation.)
+
+Then run `litdesk serve` and open **http://127.0.0.1:8000/settings** — set
+your standing queries, seed papers, and everything else from a form (see
+"Web control panel" below). Prefer hand-editing YAML instead? See
+"Configuration".
 
 **First run note:** the first `litdesk embed` (or `litdesk digest`/`litdesk
-run`, which call it for you) downloads a few hundred MB of sentence-transformers
-model weights. Nothing in Phase 1 needs that.
+run`/a Control Panel "Run now" click, all of which call it for you) downloads
+a few hundred MB of sentence-transformers model weights. Nothing in Phase 1
+needs that.
 
 **Claude summaries are on by default** (`llm.provider: claude_code` in
 `config.example.yaml`), billed through a `claude -p` subprocess against your
@@ -84,6 +110,33 @@ Claude Code subscription — no API key needed, just the `claude` CLI on PATH
 and already logged in (if running `claude` directly in your terminal works,
 this will too). See "Claude summaries" below for the other provider option
 and a usage-cost caveat worth reading before your first scheduled run.
+
+## Web control panel
+
+`litdesk serve` (see "Usage") serves three pages at `http://127.0.0.1:8000`
+(or whatever `server.port` is set to):
+
+- **`/`** — the digest itself, with working thumbs up/down (Phase 3).
+- **`/settings`** — every field in `config.yaml` as a form: standing queries,
+  seed papers (paste DOIs, or upload a BibTeX export directly — no need to
+  know a file path), sources, journals/watchlists, Claude summaries, email
+  delivery, scoop alarm, and an "Advanced" section for the rest (digest
+  sizing, rate limits, model names, and so on). Saving writes straight to
+  `config/config.yaml` — hand-editing the file still works fine too, and
+  either way the page always shows what's currently in effect. The one
+  field that never lives in this file is the SMTP password (see "Email
+  delivery") — the Settings page has a session-only password field for it
+  instead, kept in memory for as long as this `litdesk serve` process runs.
+- **`/control`** — a "Run now" button (ingest + rank + digest, same as
+  `litdesk run`, with a live log while it runs), recent run history,
+  notifications, and one-click buttons for the rest of the CLI: ranker
+  accuracy (`litdesk retrain`), BibTeX export, retraction re-checks, and
+  the weekly synthesis — each shows its result right on the page, with a
+  download link for anything written to a file.
+
+None of this needs a terminal once `litdesk serve` is running — the CLI
+commands in "Usage" below are just the same operations, useful for
+scripting/cron rather than day-to-day use.
 
 ## Usage
 
@@ -93,7 +146,7 @@ litdesk seeds       # Phase 2: load seeds.dois / seeds.bibtex_path from config a
 litdesk embed       # Phase 2: embed every paper missing a vector under the configured model
 litdesk digest      # Phase 2/3: rank candidates, render today's HTML digest (needs seeds + embeddings)
 litdesk run         # ingest + seeds + embed + digest in one shot — the crontab entry
-litdesk serve       # Phase 3: serve the digest at http://127.0.0.1:8000 with working rating buttons
+litdesk serve       # Serve the digest, Settings, and Control Panel at http://127.0.0.1:8000 (see "Web control panel")
 litdesk retrain     # Phase 3: held-out accuracy of the trained ranker on your ratings so far
 litdesk synthesis   # Phase 4: weekly cross-paper synthesis (needs llm.enabled: true) — a separate weekly cron entry
 litdesk export             # Phase 5: BibTeX of everything currently thumbed up
@@ -178,7 +231,9 @@ same way the cron example does.
 
 `config/config.yaml` (gitignored — it's yours) overrides only the fields you
 set; anything you omit falls back to the defaults in `litdesk/config.py`.
-See `config/config.example.yaml` for every available field with comments.
+See `config/config.example.yaml` for every available field with comments,
+or edit all of it from a form at `/settings` (see "Web control panel")
+instead of hand-editing YAML.
 
 The most important fields to set for yourself:
 
@@ -436,10 +491,15 @@ litdesk/
   seeds.py                       # seed loading from DOIs / BibTeX
   ranking.py                      # cosine similarity to seed centroid + nearest-seed explainability
   classifier.py                    # Phase 3: logistic regression trained on ratings, held-out eval
-  server.py                         # Phase 3: local FastAPI server (digest + /rate endpoint)
-  digest.py                          # candidate selection, ranking persistence, HTML rendering
+  pipeline.py                       # ingest+seeds+embed+digest, shared by `litdesk run` and the Control Panel
+  server.py                          # local FastAPI app: digest, /rate, Settings, Control Panel
+  config_form.py                      # Settings page <-> config.yaml form conversion
+  digest.py                            # candidate selection, ranking persistence, HTML rendering
   templates/
-    digest.html.jinja                # the digest itself, incl. rating buttons and TLDRs
+    digest.html.jinja                    # the digest itself, incl. rating buttons and TLDRs
+    settings.html.jinja                   # config.yaml as a form
+    control.html.jinja                     # Run now + status/log + notifications + tool buttons
+    _nav.html.jinja                         # shared top nav, included by all three pages above
   llm/
     client.py                          # Phase 4: Anthropic API + claude_code (`claude -p`) clients, never raise
     summarize.py                        # per-paper TLDR + weekly synthesis

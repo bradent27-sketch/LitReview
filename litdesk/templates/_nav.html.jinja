@@ -1,0 +1,19 @@
+{# Shared top nav — included by digest.html.jinja, settings.html.jinja, control.html.jinja #}
+<nav class="litdesk-nav">
+  <a href="/" {{ 'class="active"' if active == "digest" else "" }}>Digest</a>
+  <a href="/control" {{ 'class="active"' if active == "control" else "" }}>Control Panel</a>
+  <a href="/settings" {{ 'class="active"' if active == "settings" else "" }}>Settings</a>
+</nav>
+<style>
+  .litdesk-nav { display: flex; gap: 0.6rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .litdesk-nav a {
+    text-decoration: none; color: #495057; padding: 0.3rem 0.7rem; border-radius: 5px; border: 1px solid #e2e0db;
+  }
+  .litdesk-nav a:hover { background: #f1f3f5; }
+  .litdesk-nav a.active { background: #1c5fc4; border-color: #1c5fc4; color: #fff; }
+  @media (prefers-color-scheme: dark) {
+    .litdesk-nav a { color: #e8e6e3; border-color: #3a3a36; }
+    .litdesk-nav a:hover { background: #262622; }
+    .litdesk-nav a.active { background: #3a7fe0; border-color: #3a7fe0; color: #08111c; }
+  }
+</style>

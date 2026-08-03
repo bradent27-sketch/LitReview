@@ -6,31 +6,14 @@ import argparse
 import logging
 import sys
 
-from litdesk.config import Config, load_config, resolve_path
+from litdesk.config import load_config, resolve_path
 from litdesk.db import open_db
-from litdesk.digest import build_digest, render_html
 from litdesk.embeddings import embed_missing
 from litdesk.ingest import run_ingest
+from litdesk.pipeline import build_and_render_digest, run_full_pipeline
 from litdesk.seeds import load_seeds_from_config
 
 logger = logging.getLogger("litdesk.cli")
-
-
-def _build_and_render_digest(conn, cfg: Config):
-    """build_digest -> Phase 4 TLDR enrichment (no-op if llm.enabled is
-    false) -> render_html -> optional email delivery (no-op if
-    email.enabled is false). Shared by cmd_digest and cmd_run."""
-    data = build_digest(conn, cfg)
-    if cfg.llm.enabled:
-        from litdesk.llm.summarize import enrich_digest_entries
-        data = enrich_digest_entries(conn, cfg, data)
-    data["api_base"] = f"http://127.0.0.1:{cfg.server.port}"
-    path = render_html(data, resolve_path(cfg.digest.output_dir))
-    if cfg.email.enabled and data["entries"]:
-        from litdesk.email_digest import send_digest_email
-        subject = f"LitDesk digest — {data['run_date']} ({len(data['entries'])} papers)"
-        send_digest_email(cfg, subject, path.read_text())
-    return path, data
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -40,10 +23,14 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"{target} already exists, leaving it alone.")
     else:
         target.write_text(example.read_text())
-        print(f"Wrote {target} — edit it with your standing queries, journals, and seed papers.")
+        print(f"Wrote {target}")
     for d in ("data", "data/cache", "data/logs", "digests"):
         resolve_path(d).mkdir(parents=True, exist_ok=True)
-    print("Ready. Try: litdesk ingest")
+    print(
+        "\nReady. Run `litdesk serve` and open http://127.0.0.1:8000/settings to set your "
+        "standing queries, seed papers, and everything else from a form (no file-editing needed) "
+        "— or edit config/config.yaml directly if you prefer."
+    )
     return 0
 
 
@@ -128,7 +115,7 @@ def cmd_digest(args: argparse.Namespace) -> int:
         load_seeds_from_config(conn, cfg)
         embed_missing(conn, cfg)
         try:
-            path, data = _build_and_render_digest(conn, cfg)
+            path, data = build_and_render_digest(conn, cfg)
         except ValueError as exc:
             print(f"Can't build a digest yet: {exc}", file=sys.stderr)
             return 1
@@ -140,26 +127,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     """Ingest + seeds + embed + digest in one shot — the crontab entry."""
     cfg = load_config(args.config)
     db_path = resolve_path(cfg.db_path)
-    had_error = False
     with open_db(db_path) as conn:
-        for r in run_ingest(conn, cfg):
-            err = f"  ERROR: {r['error']}" if r["error"] else ""
-            had_error = had_error or bool(r["error"])
-            print(f"ingest {r['source']:<10} fetched={r['fetched']:<5} new={r['new']:<5} deduped={r['deduped']:<5}{err}")
-
-        load_seeds_from_config(conn, cfg)
-        embed_missing(conn, cfg)
-        try:
-            path, data = _build_and_render_digest(conn, cfg)
-        except ValueError as exc:
-            print(f"Can't build a digest yet: {exc}", file=sys.stderr)
-            return 1
-
-    print(f"\n{len(data['entries'])} paper(s) -> {path}")
-    if had_error:
-        print("(one or more sources errored during ingest — see above / `litdesk runs`)", file=sys.stderr)
-        return 1
-    return 0
+        result = run_full_pipeline(conn, cfg, log=print)
+    return 1 if result["data"] is None or result["had_error"] else 0
 
 
 def cmd_retrain(args: argparse.Namespace) -> int:
@@ -279,8 +249,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from litdesk.server import create_app
 
-    app = create_app(cfg)
-    print(f"Serving the digest on http://127.0.0.1:{port} — Ctrl+C to stop.")
+    app = create_app(cfg, config_path=args.config)
+    print(f"Serving on http://127.0.0.1:{port} — digest, Settings, and Control Panel. Ctrl+C to stop.")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
     return 0
 
