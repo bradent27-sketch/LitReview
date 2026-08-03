@@ -178,10 +178,17 @@ def resolve_path(cfg_relative: str) -> Path:
     return p if p.is_absolute() else REPO_ROOT / p
 
 
-def default_config_dict() -> dict:
-    """Round-trippable dict for writing an example config."""
+def config_to_dict(cfg: Config) -> dict:
+    """Round-trippable nested dict for any Config instance — the web control
+    panel's Settings page uses this to snapshot the current (not just
+    default) config before applying form edits on top of it."""
     def _dc_to_dict(obj):
         if is_dataclass(obj):
             return {f.name: _dc_to_dict(getattr(obj, f.name)) for f in fields(obj)}
         return copy.deepcopy(obj)
-    return _dc_to_dict(Config())
+    return _dc_to_dict(cfg)
+
+
+def default_config_dict() -> dict:
+    """Round-trippable dict for writing an example config."""
+    return config_to_dict(Config())

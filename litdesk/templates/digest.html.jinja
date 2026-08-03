@@ -75,6 +75,8 @@
 </style>
 </head>
 <body>
+{% set active = "digest" %}
+{% include "_nav.html.jinja" %}
 <header>
   <h1>LitDesk</h1>
   <div class="sub">{{ run_date }} &middot; {{ entries|length }} paper{{ "s" if entries|length != 1 else "" }}</div>

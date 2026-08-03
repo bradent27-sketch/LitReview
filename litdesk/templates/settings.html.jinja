@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LitDesk — Settings</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    max-width: 780px; margin: 2rem auto; padding: 0 1rem;
+    line-height: 1.45; color: #1a1a1a; background: #fdfdfc;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e8e6e3; background: #1c1c1a; }
+    .card { border-color: #3a3a36 !important; background: #232320 !important; }
+    input, select, textarea { background: #171715 !important; color: #e8e6e3 !important; border-color: #3a3a36 !important; }
+    .help { color: #9a9894 !important; }
+  }
+  h1 { margin-bottom: 0.3rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 0.6rem 0; }
+  .card {
+    border: 1px solid #e2e0db; border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1.1rem; background: #fff;
+  }
+  label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.25rem; margin-top: 0.7rem; }
+  label:first-child { margin-top: 0; }
+  .help { color: #777; font-size: 0.8rem; margin-top: 0.15rem; }
+  input[type="text"], input[type="number"], input[type="password"], input[type="file"], select, textarea {
+    width: 100%; box-sizing: border-box; padding: 0.4rem 0.55rem; border-radius: 5px;
+    border: 1px solid #d7d5d0; font-size: 0.9rem; font-family: inherit;
+  }
+  textarea { min-height: 4.5rem; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+  .checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.7rem; }
+  .checkbox-row label { margin: 0; font-weight: 600; }
+  .checkbox-row input { width: auto; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+  .flash {
+    background: #ebfbee; border: 1px solid #2f9e44; color: #2f9e44;
+    padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1.2rem; font-size: 0.9rem;
+  }
+  details.advanced { margin-top: 0.3rem; }
+  details.advanced summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; padding: 0.3rem 0; }
+  .btn {
+    font-size: 0.95rem; padding: 0.5rem 1.1rem; border-radius: 6px; border: 1px solid #1c5fc4;
+    background: #1c5fc4; color: #fff; cursor: pointer; margin-top: 1rem;
+  }
+  .btn:hover { background: #164a9c; }
+  .status-ok { color: #2f9e44; }
+  .status-off { color: #999; }
+  code { font-size: 0.85em; }
+</style>
+</head>
+<body>
+{% set active = "settings" %}
+{% include "_nav.html.jinja" %}
+<h1>Settings</h1>
+<p class="help">Saved straight to <code>config/config.yaml</code> — no hand-editing needed. Fields left as-is when you save keep whatever they already had.</p>
+
+{% if saved %}
+<div class="flash">Settings saved.</div>
+{% endif %}
+
+<form method="post" action="/settings" enctype="multipart/form-data">
+
+  <div class="card">
+    <h2>Your research</h2>
+    <label for="queries">Standing search topics (one per line)</label>
+    <textarea id="queries" name="queries" placeholder='ABSTRACT:&quot;enzyme kinetics&quot; AND ABSTRACT:mechanism'>{{ values.queries }}</textarea>
+    <div class="help">Europe PMC search queries — try them at europepmc.org/advancesearch first if unsure of the syntax.</div>
+
+    <label for="project_description">What you're actively working on (one paragraph)</label>
+    <textarea id="project_description" name="project_description">{{ values.project_description }}</textarea>
+    <div class="help">Powers the scoop alarm below — leave blank to disable it.</div>
+
+    <label for="lookback_days">Lookback window (days)</label>
+    <input type="number" id="lookback_days" name="lookback_days" min="1" value="{{ values.lookback_days }}">
+  </div>
+
+  <div class="card">
+    <h2>Seed papers</h2>
+    <label for="seeds_dois">Papers you already care about (one DOI per line)</label>
+    <textarea id="seeds_dois" name="seeds_dois" placeholder="10.1074/jbc.M113.xxxxxx">{{ values.seeds_dois }}</textarea>
+    <div class="help">Bootstraps ranking before you've rated anything — 30-60 papers recommended (your own, your lab's, a quals reading list).</div>
+
+    <label for="seeds_bibtex_file">Or upload a BibTeX export (Zotero/Paperpile: File &rarr; Export Library)</label>
+    <input type="file" id="seeds_bibtex_file" name="seeds_bibtex_file" accept=".bib">
+    {% if values.seeds_bibtex_path %}
+    <div class="help">Currently using: <code>{{ values.seeds_bibtex_path }}</code> — upload a new file to replace it.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Sources</h2>
+    <div class="checkbox-row">
+      <input type="checkbox" id="sources_europepmc" name="sources_europepmc" {{ "checked" if values.sources_europepmc }}>
+      <label for="sources_europepmc">Europe PMC (primary — MEDLINE, PMC, preprints)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="sources_biorxiv" name="sources_biorxiv" {{ "checked" if values.sources_biorxiv }}>
+      <label for="sources_biorxiv">bioRxiv (same-day preprint coverage)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="sources_medrxiv" name="sources_medrxiv" {{ "checked" if values.sources_medrxiv }}>
+      <label for="sources_medrxiv">medRxiv</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Always include &amp; watchlists</h2>
+    <label for="journals_always_include">Journals to always surface, regardless of score (one per line)</label>
+    <textarea id="journals_always_include" name="journals_always_include" placeholder="Nature&#10;Cell">{{ values.journals_always_include }}</textarea>
+
+    <label for="watchlists_authors">Watchlisted authors — their papers always appear (one per line)</label>
+    <textarea id="watchlists_authors" name="watchlists_authors">{{ values.watchlists_authors }}</textarea>
+  </div>
+
+  <div class="card">
+    <h2>Claude summaries</h2>
+    <div class="checkbox-row">
+      <input type="checkbox" id="llm_enabled" name="llm_enabled" {{ "checked" if values.llm_enabled }}>
+      <label for="llm_enabled">Generate a TLDR + relevance note for top papers, and a weekly synthesis</label>
+    </div>
+
+    <label for="llm_provider">Billing</label>
+    <select id="llm_provider" name="llm_provider">
+      <option value="claude_code" {{ "selected" if values.llm_provider == "claude_code" }}>Claude Code subscription (`claude -p` — no API key needed)</option>
+      <option value="api" {{ "selected" if values.llm_provider == "api" }}>Anthropic API key (metered, needs ANTHROPIC_API_KEY)</option>
+    </select>
+
+    <label for="llm_tldr_top_n">How many top papers per digest get a TLDR</label>
+    <input type="number" id="llm_tldr_top_n" name="llm_tldr_top_n" min="0" value="{{ values.llm_tldr_top_n }}">
+  </div>
+
+  <div class="card">
+    <h2>Email delivery</h2>
+    <div class="checkbox-row">
+      <input type="checkbox" id="email_enabled" name="email_enabled" {{ "checked" if values.email_enabled }}>
+      <label for="email_enabled">Also email me the digest</label>
+    </div>
+
+    <div class="row2">
+      <div>
+        <label for="email_smtp_host">SMTP host</label>
+        <input type="text" id="email_smtp_host" name="email_smtp_host" placeholder="smtp.gmail.com" value="{{ values.email_smtp_host }}">
+      </div>
+      <div>
+        <label for="email_smtp_port">SMTP port</label>
+        <input type="number" id="email_smtp_port" name="email_smtp_port" value="{{ values.email_smtp_port }}">
+      </div>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="email_use_tls" name="email_use_tls" {{ "checked" if values.email_use_tls }}>
+      <label for="email_use_tls">Use STARTTLS (leave checked for Gmail and most providers)</label>
+    </div>
+
+    <label for="email_smtp_username">SMTP username</label>
+    <input type="text" id="email_smtp_username" name="email_smtp_username" placeholder="you@gmail.com" value="{{ values.email_smtp_username }}">
+
+    <label for="email_smtp_password_session_only">SMTP password (this browser session only — never saved to disk)</label>
+    <input type="password" id="email_smtp_password_session_only" name="email_smtp_password_session_only" placeholder="leave blank to keep current" autocomplete="off">
+    <div class="help">
+      Currently:
+      {% if smtp_password_set %}<span class="status-ok">set for this run of `litdesk serve`</span>{% else %}<span class="status-off">not set</span>{% endif %}
+      — for Gmail, use an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App Password</a>, not your normal password.
+      This only lasts as long as this server keeps running; for the scheduled/cron `litdesk run` to send email automatically, set the
+      <code>LITDESK_SMTP_PASSWORD</code> environment variable permanently on this machine instead.
+    </div>
+
+    <div class="row2">
+      <div>
+        <label for="email_from_addr">From address</label>
+        <input type="text" id="email_from_addr" name="email_from_addr" value="{{ values.email_from_addr }}">
+      </div>
+      <div>
+        <label for="email_to_addr">To address</label>
+        <input type="text" id="email_to_addr" name="email_to_addr" value="{{ values.email_to_addr }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Scoop alarm</h2>
+    <div class="checkbox-row">
+      <input type="checkbox" id="scoop_alarm_enabled" name="scoop_alarm_enabled" {{ "checked" if values.scoop_alarm_enabled }}>
+      <label for="scoop_alarm_enabled">Flag papers unusually close to what I'm working on</label>
+    </div>
+    <label for="scoop_alarm_threshold">Similarity threshold (0-1, higher = stricter)</label>
+    <input type="number" id="scoop_alarm_threshold" name="scoop_alarm_threshold" min="0" max="1" step="0.01" value="{{ values.scoop_alarm_threshold }}">
+  </div>
+
+  <details class="advanced">
+    <summary>Advanced (rarely need to touch these)</summary>
+
+    <div class="card">
+      <label for="biorxiv_categories">bioRxiv/medRxiv categories to restrict to (one per line, e.g. "biochemistry"; blank = no filter)</label>
+      <textarea id="biorxiv_categories" name="biorxiv_categories">{{ values.biorxiv_categories }}</textarea>
+
+      <label for="watchlists_labs">Watchlisted labs/affiliations (one per line — not fully matched reliably yet)</label>
+      <textarea id="watchlists_labs" name="watchlists_labs">{{ values.watchlists_labs }}</textarea>
+
+      <div class="row2">
+        <div>
+          <label for="digest_top_n">Papers per digest</label>
+          <input type="number" id="digest_top_n" name="digest_top_n" min="1" value="{{ values.digest_top_n }}">
+        </div>
+        <div>
+          <label for="digest_catchup_top_n">Papers per digest after a gap</label>
+          <input type="number" id="digest_catchup_top_n" name="digest_catchup_top_n" min="1" value="{{ values.digest_catchup_top_n }}">
+        </div>
+      </div>
+      <label for="digest_catchup_gap_days">Gap (days) before switching to catch-up mode</label>
+      <input type="number" id="digest_catchup_gap_days" name="digest_catchup_gap_days" min="1" value="{{ values.digest_catchup_gap_days }}">
+
+      <label for="llm_tldr_model">TLDR model</label>
+      <input type="text" id="llm_tldr_model" name="llm_tldr_model" value="{{ values.llm_tldr_model }}">
+      <label for="llm_synthesis_model">Weekly synthesis model</label>
+      <input type="text" id="llm_synthesis_model" name="llm_synthesis_model" value="{{ values.llm_synthesis_model }}">
+      <label for="llm_claude_code_timeout_seconds">`claude -p` timeout (seconds)</label>
+      <input type="number" id="llm_claude_code_timeout_seconds" name="llm_claude_code_timeout_seconds" min="1" value="{{ values.llm_claude_code_timeout_seconds }}">
+
+      <label for="ranker_min_ratings_for_classifier">Ratings needed before the trained ranker takes over</label>
+      <input type="number" id="ranker_min_ratings_for_classifier" name="ranker_min_ratings_for_classifier" min="1" value="{{ values.ranker_min_ratings_for_classifier }}">
+
+      <div class="row2">
+        <div>
+          <label for="rate_limits_europepmc_per_sec">Europe PMC requests/sec</label>
+          <input type="number" id="rate_limits_europepmc_per_sec" name="rate_limits_europepmc_per_sec" step="0.1" min="0.1" value="{{ values.rate_limits_europepmc_per_sec }}">
+        </div>
+        <div>
+          <label for="rate_limits_biorxiv_per_sec">bioRxiv requests/sec</label>
+          <input type="number" id="rate_limits_biorxiv_per_sec" name="rate_limits_biorxiv_per_sec" step="0.1" min="0.1" value="{{ values.rate_limits_biorxiv_per_sec }}">
+        </div>
+      </div>
+
+      <label for="server_port">Local server port (needs a restart of `litdesk serve` to take effect)</label>
+      <input type="number" id="server_port" name="server_port" min="1" max="65535" value="{{ values.server_port }}">
+
+      <label for="cache_ttl_hours">HTTP response cache lifetime (hours)</label>
+      <input type="number" id="cache_ttl_hours" name="cache_ttl_hours" min="1" value="{{ values.cache_ttl_hours }}">
+    </div>
+  </details>
+
+  <button type="submit" class="btn">Save settings</button>
+</form>
+</body>
+</html>
